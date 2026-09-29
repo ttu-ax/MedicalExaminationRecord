@@ -1,4 +1,9 @@
 .env
+keystore.properties
+*.jks
+*.keystore
+server-site/dist/downloads/*.apk
+release-site/
 testImg/
 .gradle/
 .kotlin/

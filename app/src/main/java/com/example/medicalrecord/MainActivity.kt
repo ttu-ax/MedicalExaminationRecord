@@ -2,6 +2,8 @@ package com.example.medicalrecord
 
 import android.net.Uri
 import android.os.Bundle
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -52,11 +54,35 @@ private fun matchingReports(newReport: Report, existing: List<Report>): List<Rep
 class MainActivity : ComponentActivity() {
     private lateinit var db: RecordDb
     @Volatile private var pendingDuplicateDecision: ArrayBlockingQueue<Boolean>? = null
+    private var availableUpdate by mutableStateOf<AppUpdate?>(null)
+    private var updateDownloading by mutableStateOf(false)
+    private var updateMessage by mutableStateOf("")
+    private var pendingInstallerFile by mutableStateOf<File?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         db = RecordDb(this)
         setContent { MedicalRecordTheme { App() } }
+        Thread {
+            val update = runCatching { AppUpdateService.check(this) }.getOrNull()
+            runOnUiThread {
+                val dismissed = getSharedPreferences("app-updates", MODE_PRIVATE)
+                    .getLong("dismissed_version", 0L)
+                if (update != null && (update.forceUpdate || dismissed < update.versionCode)) {
+                    availableUpdate = update
+                }
+            }
+        }.start()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val apk = pendingInstallerFile ?: return
+        if (AppUpdateService.canInstallPackages(this)) {
+            pendingInstallerFile = null
+            runCatching { AppUpdateService.install(this, apk) }
+                .onFailure { updateMessage = it.message ?: "无法打开系统安装程序" }
+        }
     }
 
     override fun onDestroy() {
@@ -217,7 +243,6 @@ class MainActivity : ComponentActivity() {
             }
         }, containerColor = MedicalPalette.Canvas) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
-                progress?.let { RecognitionProgressCard(it) { progress = null } }
                 if (selectedReport != null) {
                     val report = reports.firstOrNull { it.id == selectedReport }
                     if (report != null) ReportDetail(
@@ -262,7 +287,7 @@ class MainActivity : ComponentActivity() {
                                     val result = recognizeImage(report.imagePath, apiKey,
                                         onStage = { stage -> runOnUiThread { progress = progress?.copy(stage = stage) } },
                                         onStream = { stream -> runOnUiThread { progress = progress?.copy(stream = stream) } })
-                                    db.updateReport(report.copy(type = result.report.type, sampleDate = result.report.sampleDate, reportDate = result.report.reportDate, institution = result.report.institution, status = "待校对"))
+                                    db.updateReport(report.copy(type = result.report.type, sampleDate = result.report.sampleDate, reportDate = result.report.reportDate, institution = result.report.institution, status = "待校对", suggestedCategory = result.report.suggestedCategory))
                                     db.replaceObservations(report.id, result.observations)
                                     runOnUiThread { refresh(); notice = "重新识别完成，请校对新增项目。"; busy = false; progress = progress?.copy(completed = 1, stage = notice, active = false) }
                                 } catch (error: Exception) {
@@ -333,11 +358,78 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        if (duplicateReview == null) progress?.let { RecognitionProgressCard(it) { progress = null } }
         duplicateReview?.let { review ->
             DuplicateReportReview(review.newReport, review.existingReports) { shouldImport ->
                 review.decision.offer(shouldImport)
                 duplicateReview = null
             }
         }
+        availableUpdate?.let { update ->
+            AlertDialog(
+                onDismissRequest = {
+                    if (!update.forceUpdate && !updateDownloading) dismissUpdate(update.versionCode)
+                },
+                title = { Text("发现新版本 ${update.versionName}") },
+                text = {
+                    Column {
+                        Text(update.releaseNotes.joinToString(separator = "\n") { "•  $it" })
+                        if (updateDownloading) Text("\n正在下载并校验安装包…")
+                        if (updateMessage.isNotBlank()) Text("\n$updateMessage")
+                    }
+                },
+                confirmButton = {
+                    Button(enabled = !updateDownloading, onClick = {
+                        val cached = pendingInstallerFile
+                        if (cached != null) {
+                            if (AppUpdateService.canInstallPackages(this@MainActivity)) {
+                                pendingInstallerFile = null
+                                runCatching { AppUpdateService.install(this@MainActivity, cached) }
+                                    .onFailure { updateMessage = it.message ?: "无法打开系统安装程序" }
+                            } else {
+                                updateMessage = "请在系统设置中允许本 APP 安装未知应用，返回后会继续安装。"
+                                AppUpdateService.requestInstallPermission(this@MainActivity)
+                            }
+                        } else {
+                            updateDownloading = true
+                            updateMessage = ""
+                            Thread {
+                                val result = runCatching { AppUpdateService.download(this@MainActivity, update) }
+                                runOnUiThread {
+                                    updateDownloading = false
+                                    result.onSuccess { apk ->
+                                        pendingInstallerFile = apk
+                                        if (AppUpdateService.canInstallPackages(this@MainActivity)) {
+                                            pendingInstallerFile = null
+                                            runCatching { AppUpdateService.install(this@MainActivity, apk) }
+                                                .onFailure { updateMessage = it.message ?: "无法打开系统安装程序" }
+                                        } else {
+                                            updateMessage = "下载与校验完成。请授权安装，返回后即可继续。"
+                                            AppUpdateService.requestInstallPermission(this@MainActivity)
+                                        }
+                                    }.onFailure { error ->
+                                        updateMessage = error.message ?: "下载更新失败，请稍后重试。"
+                                    }
+                                }
+                            }.start()
+                        }
+                    }) {
+                        Text(if (updateDownloading) "正在下载…" else if (pendingInstallerFile != null) "继续安装" else "立即更新")
+                    }
+                },
+                dismissButton = if (update.forceUpdate) null else ({
+                    TextButton(enabled = !updateDownloading, onClick = { dismissUpdate(update.versionCode) }) {
+                        Text("稍后")
+                    }
+                })
+            )
+        }
+    }
+
+    private fun dismissUpdate(versionCode: Long) {
+        getSharedPreferences("app-updates", MODE_PRIVATE).edit()
+            .putLong("dismissed_version", versionCode).apply()
+        availableUpdate = null
+        updateMessage = ""
     }
 }

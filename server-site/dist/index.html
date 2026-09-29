@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f4">
+  <meta name="description" content="体检记录 Android App 版本发布页与更新信息。">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231d5547'/%3E%3Cpath d='M29 13h6v16h16v6H35v16h-6V35H13v-6h16z' fill='white'/%3E%3C/svg%3E">
+  <title>体检记录 · 版本中心</title>
+  <style>
+    :root{color-scheme:light;--paper:#f6f7f4;--ink:#172622;--muted:#687772;--line:#dce3dd;--green:#1d5547;--mint:#dcebe3;--white:#fff;--amber:#9a5b13}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;line-height:1.55}
+    .wrap{width:min(100% - 40px,1040px);margin:auto}.top{height:82px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+    .brand{display:flex;align-items:center;gap:12px;font-size:15px;font-weight:700;letter-spacing:.01em}.mark{width:34px;height:34px;border-radius:11px;background:var(--green);color:white;display:grid;place-items:center;font-size:21px;font-weight:500}.top small{color:var(--muted);font-size:13px}
+    main{padding:66px 0 84px}.eyebrow{color:var(--green);font-size:12px;font-weight:750;letter-spacing:.13em;text-transform:uppercase}.intro{display:flex;align-items:end;justify-content:space-between;gap:30px;margin:13px 0 34px}.intro h1{font-size:clamp(36px,6vw,58px);line-height:1.08;letter-spacing:-.055em;margin:0;max-width:630px}.intro p{margin:16px 0 0;color:var(--muted);max-width:490px}.live{white-space:nowrap;color:var(--green);font-size:13px;font-weight:650;display:flex;gap:9px;align-items:center;padding-bottom:8px}.dot{width:8px;height:8px;border-radius:50%;background:#55a576;box-shadow:0 0 0 4px #55a57620}
+    .card{background:var(--white);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 10px 32px #19382a08}.cardhead{padding:24px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.cardhead h2{font-size:16px;margin:0}.badge{font-size:12px;color:var(--green);background:var(--mint);border-radius:100px;padding:6px 11px;font-weight:700}.body{padding:32px 28px;display:grid;grid-template-columns:1fr auto;gap:32px;align-items:center}.version{font-size:clamp(42px,7vw,64px);line-height:1;letter-spacing:-.06em;font-weight:700}.version span{font-size:14px;letter-spacing:0;color:var(--muted);font-weight:500;margin-left:8px}.date{color:var(--muted);font-size:13px;margin-top:12px}.download{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:12px;padding:13px 20px;background:var(--green);color:#fff;text-decoration:none;font-size:14px;font-weight:700;min-width:170px}.download[aria-disabled=true]{background:#e9eeea;color:#75827c;pointer-events:none}.notes{padding:22px 28px 26px;background:#fafbf9;border-top:1px solid var(--line)}.notes h3{font-size:13px;margin:0 0 12px}.notes ul{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:10px 24px}.notes li{font-size:13px;color:#42534c;display:flex;gap:9px;align-items:flex-start}.notes li:before{content:"✓";color:var(--green);font-weight:800}.api{margin-top:22px;border:1px solid var(--line);border-radius:16px;padding:20px 22px;display:flex;justify-content:space-between;align-items:center;gap:20px}.api strong{display:block;font-size:13px}.api p{margin:5px 0 0;color:var(--muted);font-size:12px}.api code{font-size:12px;background:#e9eeea;border-radius:6px;padding:8px 10px;color:#355448;white-space:nowrap}footer{border-top:1px solid var(--line);padding:20px 0 28px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;gap:15px}
+    @media(max-width:650px){.wrap{width:min(100% - 28px,1040px)}.top{height:68px}.top small{font-size:11px}main{padding:45px 0 58px}.intro{display:block}.intro h1{max-width:480px}.live{padding:0;margin-top:20px}.cardhead{padding:18px 19px}.body{padding:26px 19px;display:flex;align-items:flex-start;flex-direction:column;gap:22px}.download{width:100%}.notes{padding:20px 19px}.notes ul{grid-template-columns:1fr}.api{align-items:flex-start;flex-direction:column}.api code{max-width:100%;overflow-wrap:anywhere;white-space:normal}footer{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <header class="wrap top"><div class="brand"><span class="mark" aria-hidden="true">＋</span><span>体检记录</span></div><small>ANDROID · RELEASES</small></header>
+  <main class="wrap">
+    <div class="eyebrow">版本中心 / Release notes</div>
+    <section class="intro"><div><h1>每份记录，<br>都值得被妥善保存。</h1><p>查看体检记录 App 的最新版本与更新内容。App 会定期检查此处的版本信息。</p></div><div class="live"><i class="dot"></i>版本信息可用</div></section>
+    <section class="card" aria-labelledby="release-title">
+      <div class="cardhead"><h2 id="release-title">最新稳定版</h2><span class="badge">当前版本</span></div>
+      <div class="body"><div><div class="version" id="version">0.5.0 <span>Android</span></div><div class="date" id="date">发布日期 · 2026 年 9 月 29 日</div></div><a class="download" id="download" href="#" aria-disabled="true"><span>↓</span> 暂无安装包</a></div>
+      <div class="notes"><h3>本次更新</h3><ul id="notes"><li>支持体检报告图片导入与拍照识别</li><li>可校对报告指标并查看历史趋势</li></ul></div>
+    </section>
+    <section class="api"><div><strong>APP 更新接口</strong><p>App 通过此 JSON 文件检查版本、更新说明和安装包地址。</p></div><code id="api-url">/update.json</code></section>
+  </main>
+  <footer class="wrap"><span>体检记录 · 为个人健康资料提供清晰的整理方式</span><span>版本信息以 App 内检查结果为准</span></footer>
+  <script>
+    fetch('/update.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('unavailable');return r.json()}).then(data=>{
+      document.getElementById('version').innerHTML=`${data.version_name} <span>Android</span>`;
+      const d=new Date(data.published_at);if(!Number.isNaN(d.getTime()))document.getElementById('date').textContent=`发布日期 · ${new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'long',day:'numeric'}).format(d)}`;
+      const link=document.getElementById('download');if(data.download_url){link.href=data.download_url;link.removeAttribute('aria-disabled');link.innerHTML='<span>↓</span> 下载 Android 安装包'}
+      const list=document.getElementById('notes');list.replaceChildren(...(data.release_notes||[]).map(note=>{const li=document.createElement('li');li.textContent=note;return li}));
+      document.getElementById('api-url').textContent=new URL('/update.json',location.href).href;
+    }).catch(()=>{document.querySelector('.live').innerHTML='<i class="dot"></i>暂时无法读取版本信息'});
+  </script>
+</body>
+</html>

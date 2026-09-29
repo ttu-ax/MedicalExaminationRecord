@@ -339,6 +339,13 @@ fun ReportDetail(
                 Text("采样日期：${sampleDate.ifBlank { "待确认" }}")
                 Text(institution.ifBlank { "机构未识别" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { choosingCategory = true }) { Text("分类：$category · 修改") }
+                if (category == "其他" && report.suggestedCategory.isNotBlank()) {
+                    Text("建议分类：${report.suggestedCategory}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = {
+                        category = report.suggestedCategory
+                        onSaveReport(report.copy(category = category))
+                    }) { Text("创建并移入此分类") }
+                }
                 TextButton(onClick = { editingInfo = !editingInfo }) { Text(if (editingInfo) "收起信息" else "修改报告信息") }
             }
             if (editingInfo) {

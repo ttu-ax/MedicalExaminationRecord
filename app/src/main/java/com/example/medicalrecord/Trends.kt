@@ -89,7 +89,6 @@ private fun visibleStages(stages: List<Stage>, firstDay: Long, lastDay: Long): L
 private data class TrendPoint(val observation: Observation, val report: Report, val day: Long, val number: Double)
 
 private data class UnitAxis(val unit: String, val min: Double, val max: Double, val color: Color)
-private val unitColors = listOf(Color(0xFF1769AA), Color(0xFFB35F2B), Color(0xFF7658A8), Color(0xFF13816F), Color(0xFF9A435E))
 private val sourceColors = listOf(Color(0xFF1769AA), Color(0xFFB35F2B), Color(0xFF7658A8), Color(0xFF13816F), Color(0xFF9A435E))
 private fun trendStageColor(category: String): Color = when (category) {
     "饮食" -> Color(0xFF278361)
@@ -99,14 +98,15 @@ private fun trendStageColor(category: String): Color = when (category) {
     else -> Color(0xFF71858A)
 }
 
-private fun axesFor(points: List<TrendPoint>, references: Map<String, Pair<TrendPoint, ReferenceLimits>>): List<UnitAxis> =
-    points.map { it.observation.unit }.distinct().mapIndexed { index, unit ->
-        val values = points.filter { it.observation.unit == unit }.map { it.number } +
-            listOfNotNull(references[unit]?.second?.lower, references[unit]?.second?.upper)
+private fun axisFor(points: List<TrendPoint>, reference: Pair<TrendPoint, ReferenceLimits>?): UnitAxis? =
+    if (points.isEmpty()) null else run {
+        val unit = points.lastOrNull { it.observation.unit.isNotBlank() }?.observation?.unit.orEmpty()
+        val values = points.map { it.number } +
+            listOfNotNull(reference?.second?.lower, reference?.second?.upper)
         val low = values.minOrNull() ?: 0.0
         val high = values.maxOrNull() ?: 1.0
         val spread = (high - low).coerceAtLeast(abs(high) * 0.1).coerceAtLeast(1.0)
-        UnitAxis(unit, low - spread * 0.12, high + spread * 0.12, unitColors[index % unitColors.size])
+        UnitAxis(unit, low - spread * 0.12, high + spread * 0.12, Color(0xFF1769AA))
     }
 
 private fun displayUnit(unit: String) = unit.ifBlank { "无单位" }
@@ -130,7 +130,6 @@ fun TrendDetail(
 ) {
     val all = remember(key, observations, reports) { pointsFor(key, observations, reports) }
     var window by remember(key) { mutableStateOf("全部") }
-    var activeUnit by remember(key) { mutableStateOf<String?>(null) }
     var landscape by remember(key) { mutableStateOf(false) }
     val activity = LocalContext.current as? Activity
     DisposableEffect(activity) { onDispose { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED } }
@@ -146,12 +145,9 @@ fun TrendDetail(
     }
     var selected by remember(key, window) { mutableStateOf<TrendPoint?>(null) }
     var selectedStage by remember(key, window) { mutableStateOf<Stage?>(null) }
-    val references = points.groupBy { it.observation.unit }.mapNotNull { (unit, unitPoints) ->
-        unitPoints.mapNotNull { point -> referenceLimits(point.observation.reference)?.let { point to it } }.lastOrNull()?.let { unit to it }
-    }.toMap()
-    val axes = axesFor(points, references)
-    val axis = axes.firstOrNull { it.unit == activeUnit } ?: axes.firstOrNull()
-    val chartPoints = if (axis == null) emptyList() else points.filter { it.observation.unit == axis.unit }
+    val reference = points.mapNotNull { point -> referenceLimits(point.observation.reference)?.let { point to it } }.lastOrNull()
+    val axis = axisFor(points, reference)
+    val chartPoints = points
     val sourceCategories = chartPoints.map { it.report.category }.distinct().sorted()
     val sourcePalette = sourceCategories.mapIndexed { index, category -> category to sourceColors[index % sourceColors.size] }.toMap()
     val shownStages = if (chartPoints.isEmpty()) emptyList() else visibleStages(stages, chartPoints.first().day, chartPoints.last().day)
@@ -164,8 +160,7 @@ fun TrendDetail(
             }
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(0.7f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    UnitSelector(axes, axis?.unit) { activeUnit = it }
-                    if (axis != null) TrendPanel(chartPoints, shownStages, axis, references[axis.unit], sourcePalette, true,
+                    if (axis != null) TrendPanel(chartPoints, shownStages, axis, reference, sourcePalette, true,
                         Modifier.fillMaxWidth().weight(1f), onPoint = { selected = it }, onOpenReport = onOpenReport)
                     else Text("该时间段没有记录")
                 }
@@ -207,11 +202,10 @@ fun TrendDetail(
                     WindowSelector(window) { window = it }
                     TextButton(onClick = { landscape = true; activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }) { Text("横屏展开 ↗") }
                 }
-                UnitSelector(axes, axis?.unit) { activeUnit = it }
             }
             item {
                 if (axis == null) Text("该时间段没有记录")
-                else TrendPanel(chartPoints, shownStages, axis, references[axis.unit], sourcePalette, false,
+                else TrendPanel(chartPoints, shownStages, axis, reference, sourcePalette, false,
                     Modifier.fillMaxWidth(), onPoint = { selected = it }, onOpenReport = onOpenReport)
             }
             selected?.let { point -> item {
@@ -244,16 +238,6 @@ private fun WindowSelector(value: String, onChoose: (String) -> Unit) {
         listOf("3个月", "1年", "全部").forEach { option ->
             if (value == option) Button(onClick = { onChoose(option) }) { Text(option) }
             else OutlinedButton(onClick = { onChoose(option) }) { Text(option) }
-        }
-    }
-}
-
-@Composable
-private fun UnitSelector(axes: List<UnitAxis>, current: String?, onChoose: (String) -> Unit) {
-    if (axes.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        axes.forEach { axis ->
-            if (axis.unit == current) Button(onClick = { onChoose(axis.unit) }) { Text(displayUnit(axis.unit)) }
-            else OutlinedButton(onClick = { onChoose(axis.unit) }) { Text(displayUnit(axis.unit)) }
         }
     }
 }

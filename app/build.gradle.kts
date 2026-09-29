@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -12,8 +14,8 @@ android {
         applicationId = "com.example.medicalrecord"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 9
+        versionName = "0.5.4"
     }
 
     buildFeatures {
@@ -32,4 +34,21 @@ dependencies {
     implementation("androidx.compose.ui:ui:1.6.8")
     implementation("androidx.compose.foundation:foundation:1.6.8")
     implementation("androidx.compose.material3:material3:1.2.1")
+}
+
+// Keep release signing material out of source control. See keystore.properties.example.
+val releaseSigningFile = rootProject.file("keystore.properties")
+if (releaseSigningFile.isFile) {
+    val releaseSigning = Properties().apply {
+        releaseSigningFile.inputStream().use(::load)
+    }
+    android.signingConfigs.create("release") {
+        storeFile = rootProject.file(requireNotNull(releaseSigning.getProperty("storeFile")))
+        storePassword = requireNotNull(releaseSigning.getProperty("storePassword"))
+        keyAlias = requireNotNull(releaseSigning.getProperty("keyAlias"))
+        keyPassword = requireNotNull(releaseSigning.getProperty("keyPassword"))
+    }
+    android.buildTypes.getByName("release") {
+        signingConfig = android.signingConfigs.getByName("release")
+    }
 }

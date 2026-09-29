@@ -23,8 +23,8 @@ private val reportTypes = setOf("血常规", "生化", "凝血", "其他")
 private val datePattern = Regex("(\\d{4})[-年/.](\\d{1,2})[-月/.](\\d{1,2})")
 private const val PROMPT = """你是检验报告逐字转录助手。读取这一张报告图片，仅返回 JSON 对象。
 不要诊断、推断、解释或补充常见正常值。不要提取姓名、病历号等身份信息。
-格式：{"report_type":"血常规|生化|凝血|其他", "sample_date":"YYYY-MM-DD 或空字符串", "report_date":"YYYY-MM-DD 或空字符串", "institution":"报告上可见机构或空字符串", "observations":[{"name":"报告项目原文", "value":"结果原文", "unit":"单位原文或空字符串", "reference":"参考范围原文或空字符串", "flag":"报告提示↑、↓或空字符串"}]}。
-必须逐行检查表格两栏/多栏，保持项目与结果、范围、单位同行对应。看不清的字段写空字符串，不猜测。报告类型不确定写其他。日期仅使用报告上实际印刷的采样或报告日期。只输出 JSON。"""
+格式：{"report_type":"血常规|生化|凝血|其他", "suggested_category":"建议分类名或空字符串", "sample_date":"YYYY-MM-DD 或空字符串", "report_date":"YYYY-MM-DD 或空字符串", "institution":"报告上可见机构或空字符串", "observations":[{"name":"报告项目原文", "value":"结果原文", "unit":"单位原文或空字符串", "reference":"参考范围原文或空字符串", "flag":"报告提示↑、↓或空字符串"}]}。
+必须逐行检查表格两栏/多栏，保持项目与结果、范围、单位同行对应。看不清的字段写空字符串，不猜测。报告类型不确定写其他；此时根据报告标题和项目名称给出简短、具体的 suggested_category，不确定则留空。其他类型的 suggested_category 留空。日期仅使用报告上实际印刷的采样或报告日期。只输出 JSON。"""
 
 fun copyImage(context: Context, source: Uri): String {
     val mime = context.contentResolver.getType(source) ?: "image/jpeg"
@@ -150,7 +150,8 @@ fun recognizeImage(path: String, apiKey: String, onStage: (String) -> Unit, onSt
         onStage("判断报告类型")
         type = try { decideType(apiKey, rows) ?: type } catch (_: Exception) { type }
     }
-    return RecognizedReport(Report(0, type, normalizedDate(parsed.opt("sample_date")), normalizedDate(parsed.opt("report_date")), clean(parsed.opt("institution")), path, "待校对", model), rows)
+    val suggestion = if (type == "其他") clean(parsed.opt("suggested_category"), 40).takeUnless { it == "其他" } ?: "" else ""
+    return RecognizedReport(Report(0, type, normalizedDate(parsed.opt("sample_date")), normalizedDate(parsed.opt("report_date")), clean(parsed.opt("institution")), path, "待校对", model, suggestedCategory = suggestion), rows)
 }
 
 private fun decideType(apiKey: String, rows: List<Observation>): String? {

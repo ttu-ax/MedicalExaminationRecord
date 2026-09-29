@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -38,21 +37,19 @@ data class RecognitionProgress(
 @Composable
 fun RecognitionProgressCard(progress: RecognitionProgress, onDismiss: () -> Unit) {
     val streamScroll = rememberScrollState()
-    var showDetails by remember { mutableStateOf(false) }
     LaunchedEffect(progress.current, progress.stream, streamScroll.maxValue) {
         streamScroll.scrollTo(streamScroll.maxValue)
     }
-    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("识别进度 · ${progress.current}/${progress.total} 张", style = MaterialTheme.typography.titleMedium)
+    AlertDialog(
+        onDismissRequest = { if (!progress.active) onDismiss() },
+        title = { Text("识别进度 · ${progress.current}/${progress.total} 张") },
+        text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             LinearProgressIndicator(progress = { progress.completed.toFloat() / progress.total.coerceAtLeast(1) }, modifier = Modifier.fillMaxWidth())
             Text(progress.stage, color = MaterialTheme.colorScheme.primary)
             if (progress.active) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             if (progress.error.isNotBlank()) Text(progress.error, color = MaterialTheme.colorScheme.error)
-            if (!progress.active && progress.stream.isNotBlank()) {
-                TextButton(onClick = { showDetails = !showDetails }) { Text(if (showDetails) "隐藏模型输出" else "查看模型输出") }
-            }
-            if (progress.stream.isNotBlank() && (progress.active || showDetails)) {
+            if (progress.stream.isNotBlank()) {
                 Text("模型实时返回（原始内容）", style = MaterialTheme.typography.labelLarge)
                 Text(
                     progress.stream,
@@ -60,9 +57,10 @@ fun RecognitionProgressCard(progress: RecognitionProgress, onDismiss: () -> Unit
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            if (!progress.active) TextButton(onClick = onDismiss) { Text("关闭进度") }
         }
-    }
+        },
+        confirmButton = { if (!progress.active) TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
 }
 
 @Composable

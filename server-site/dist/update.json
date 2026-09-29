@@ -1,0 +1,14 @@
+{
+    "app_name":  "体检记录",
+    "package_name":  "com.example.medicalrecord",
+    "version_name":  "0.5.4",
+    "version_code":  9,
+    "minimum_supported_version_code":  1,
+    "force_update":  false,
+    "published_at":  "2026-09-29T15:06:28Z",
+    "release_notes":  [
+                          "修复识别弹窗、其他报告分类建议与同名指标趋势"
+                      ],
+    "download_url":  "https://acupofttu.top/downloads/medical-record-v0.5.4.apk",
+    "sha256":  "eebefc59cac258424912af4f415d89b3e0d9770bc3257a5656bb952635bae5b9"
+}
