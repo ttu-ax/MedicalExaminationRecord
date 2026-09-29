@@ -1,0 +1,10 @@
+.env
+testImg/
+.gradle/
+.kotlin/
+.idea/
+local.properties
+**/build/
+*.iml
+server/__pycache__/
+server/*.log
