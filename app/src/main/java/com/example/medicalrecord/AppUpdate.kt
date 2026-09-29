@@ -38,16 +38,17 @@ internal object AppUpdateService {
             setRequestProperty("Cache-Control", "no-cache")
         }
         return try {
-            if (connection.responseCode !in 200..299) return null
+            if (connection.responseCode !in 200..299) error("更新服务返回 HTTP ${connection.responseCode}")
             val json = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
-            if (json.optString("package_name") != context.packageName) return null
+            if (json.optString("package_name") != context.packageName) error("更新信息中的应用标识不匹配")
             val versionCode = json.optLong("version_code", -1)
+            if (versionCode < 1) error("更新信息中的版本号无效")
             if (versionCode <= installedVersionCode(context)) return null
-            val downloadUrl = json.optString("download_url").takeIf(String::isNotBlank) ?: return null
+            val downloadUrl = json.optString("download_url").takeIf(String::isNotBlank) ?: error("更新信息缺少下载地址")
             val sha256 = json.optString("sha256").lowercase()
-            if (!sha256.matches(Regex("[a-f0-9]{64}"))) return null
+            if (!sha256.matches(Regex("[a-f0-9]{64}"))) error("更新信息中的安装包校验值无效")
             val uri = URI(downloadUrl)
-            if (uri.scheme != "https" || uri.host != SITE_HOST || uri.userInfo != null) return null
+            if (uri.scheme != "https" || uri.host != SITE_HOST || uri.userInfo != null) error("更新信息中的下载地址无效")
             val current = installedVersionCode(context)
             val minimum = json.optLong("minimum_supported_version_code", 1)
             AppUpdate(

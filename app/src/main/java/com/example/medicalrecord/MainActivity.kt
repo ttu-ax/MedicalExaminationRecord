@@ -57,19 +57,36 @@ class MainActivity : ComponentActivity() {
     private var availableUpdate by mutableStateOf<AppUpdate?>(null)
     private var updateDownloading by mutableStateOf(false)
     private var updateMessage by mutableStateOf("")
+    private var updateChecking by mutableStateOf(false)
+    private var updateCheckStatus by mutableStateOf("打开应用时会自动检查更新")
     private var pendingInstallerFile by mutableStateOf<File?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         db = RecordDb(this)
         setContent { MedicalRecordTheme { App() } }
+        checkForUpdates(manual = false)
+    }
+
+    private fun checkForUpdates(manual: Boolean) {
+        if (updateChecking) return
+        updateChecking = true
+        updateCheckStatus = "正在检查更新…"
         Thread {
-            val update = runCatching { AppUpdateService.check(this) }.getOrNull()
+            val result = runCatching { AppUpdateService.check(this) }
             runOnUiThread {
-                val dismissed = getSharedPreferences("app-updates", MODE_PRIVATE)
-                    .getLong("dismissed_version", 0L)
-                if (update != null && (update.forceUpdate || dismissed < update.versionCode)) {
-                    availableUpdate = update
+                updateChecking = false
+                result.onSuccess { update ->
+                    if (update == null) {
+                        updateCheckStatus = "已是最新版本"
+                    } else {
+                        updateCheckStatus = "发现新版本 ${update.versionName}"
+                        val dismissed = getSharedPreferences("app-updates", MODE_PRIVATE)
+                            .getLong("dismissed_version", 0L)
+                        if (manual || update.forceUpdate || dismissed < update.versionCode) availableUpdate = update
+                    }
+                }.onFailure { error ->
+                    updateCheckStatus = "检查失败：${error.message ?: "无法连接更新服务"}"
                 }
             }
         }.start()
@@ -111,6 +128,7 @@ class MainActivity : ComponentActivity() {
         var pendingUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
         var progress by remember { mutableStateOf<RecognitionProgress?>(null) }
         var duplicateReview by remember { mutableStateOf<DuplicateReview?>(null) }
+        val currentVersion = remember { packageManager.getPackageInfo(packageName, 0).versionName ?: "未知" }
 
         fun goBack() {
             when {
@@ -343,7 +361,7 @@ class MainActivity : ComponentActivity() {
                         onAdd = { db.addStage(it); refresh() },
                         onUpdate = { db.updateStage(it); refresh() },
                         onDelete = { db.deleteStage(it); refresh() })
-                    else -> SettingsScreen(hasKey, onBack = ::goBack,
+                    else -> SettingsScreen(hasKey, currentVersion, updateChecking, updateCheckStatus, onCheckUpdate = { checkForUpdates(manual = true) }, onBack = ::goBack,
                         onSave = { key ->
                             keyStore.save(key)
                             hasKey = true

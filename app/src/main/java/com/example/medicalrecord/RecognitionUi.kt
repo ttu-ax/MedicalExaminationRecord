@@ -64,13 +64,19 @@ fun RecognitionProgressCard(progress: RecognitionProgress, onDismiss: () -> Unit
 }
 
 @Composable
-fun SettingsScreen(hasKey: Boolean, onBack: () -> Unit, onSave: (String) -> Unit, onClear: () -> Unit) {
+fun SettingsScreen(
+    hasKey: Boolean, currentVersion: String, checkingUpdate: Boolean, updateStatus: String, onCheckUpdate: () -> Unit,
+    onBack: () -> Unit, onSave: (String) -> Unit, onClear: () -> Unit
+) {
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var confirmingClear by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         TextButton(onClick = onBack) { Text("← 返回首页") }
         Text("设置", style = MaterialTheme.typography.headlineMedium)
+        Text("应用更新 · 当前版本 $currentVersion", style = MaterialTheme.typography.titleMedium)
+        Text(updateStatus, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = onCheckUpdate, enabled = !checkingUpdate) { Text(if (checkingUpdate) "正在检查…" else "检查更新") }
         Text("百炼 API Key：${if (hasKey) "已保存" else "未填写"}")
         Text("输入后可直接在手机上识别报告，无需运行电脑端服务。密钥使用设备密钥库加密保存。")
         OutlinedTextField(
