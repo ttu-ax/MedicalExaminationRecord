@@ -37,6 +37,7 @@ $apkPath = Join-Path (Join-Path $dist 'downloads') $fileName
 if (-not (Test-Path -LiteralPath $apkPath -PathType Leaf)) { throw "Release APK not found: $apkPath" }
 $sha256 = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($sha256 -ne $manifest.sha256.ToLowerInvariant()) { throw 'The release APK does not match the manifest SHA-256.' }
+$manifestSha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $sshOptions = @('-i', $keyPath, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=12')
 & ssh.exe @sshOptions -p 22 $remoteTarget "mkdir -p '$stage/downloads'"
@@ -72,9 +73,11 @@ try {
     if ([int]$head.StatusCode -ne 200) { throw 'The live APK download is unavailable.' }
 } catch {
     Write-Warning 'Public HTTPS could not be checked from this computer; checking HTTPS through the server loopback address.'
-    $liveJson = & ssh.exe @sshOptions -p 22 $remoteTarget "curl -fsS --resolve acupofttu.top:443:127.0.0.1 '$siteOrigin/update.json?verify=$($manifest.version_code)'"
+    $remoteHashOutput = & ssh.exe @sshOptions -p 22 $remoteTarget "curl -fsS --resolve acupofttu.top:443:127.0.0.1 '$siteOrigin/update.json?verify=$($manifest.version_code)' | sha256sum"
     if ($LASTEXITCODE -ne 0) { throw 'The server could not serve the live update manifest over HTTPS.' }
-    $live = ($liveJson -join [Environment]::NewLine) | ConvertFrom-Json
+    $remoteManifestSha256 = [regex]::Match(($remoteHashOutput -join ''), '^[a-fA-F0-9]{64}').Value.ToLowerInvariant()
+    if ($remoteManifestSha256 -ne $manifestSha256) { throw 'The live update manifest does not match the uploaded file.' }
+    $live = $manifest
     $headStatus = & ssh.exe @sshOptions -p 22 $remoteTarget "curl -fsS -o /dev/null -w '%{http_code}' -I --resolve acupofttu.top:443:127.0.0.1 '$($manifest.download_url)'"
     if ($LASTEXITCODE -ne 0 -or ($headStatus -join '') -ne '200') { throw 'The server could not serve the live APK over HTTPS.' }
     $verifiedLocallyOnServer = $true

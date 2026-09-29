@@ -72,12 +72,37 @@ if (-not $remoteMain.Count -or ($remoteMain[0] -split '\s+')[0] -ne $head) {
     throw 'Push the release commit to Gitee main before publishing.'
 }
 
-$secureToken = Read-Host 'Gitee personal access token (not saved)' -AsSecureString
-$tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
-try {
-    $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer)
-} finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
+$envPath = Join-Path $PSScriptRoot '.env'
+$secureToken = $null
+$token = $null
+$saveToken = $false
+if (-not [string]::IsNullOrWhiteSpace($env:GITEE_TOKEN)) {
+    $token = $env:GITEE_TOKEN.Trim()
+} else {
+    if (Test-Path -LiteralPath $envPath -PathType Leaf) {
+        foreach ($line in [System.IO.File]::ReadAllLines($envPath, [System.Text.Encoding]::UTF8)) {
+            if ($line -match '^\s*GITEE_TOKEN_DPAPI=(.+)\s*$') {
+                $secureToken = $Matches[1].Trim() | ConvertTo-SecureString
+                break
+            }
+            if ($line -match '^\s*GITEE_TOKEN=(.+)\s*$') {
+                $token = $Matches[1].Trim().Trim('"', "'")
+                break
+            }
+        }
+    }
+    if (-not $secureToken -and [string]::IsNullOrWhiteSpace($token)) {
+        $secureToken = Read-Host 'Gitee personal access token (saved encrypted after success)' -AsSecureString
+        $saveToken = $true
+    }
+    if ($secureToken) {
+        $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+        try {
+            $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer)
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
+        }
+    }
 }
 if ([string]::IsNullOrWhiteSpace($token)) { throw 'Gitee token is required.' }
 
@@ -96,15 +121,23 @@ try {
     $existing = Invoke-GiteeApi $client 'GET' "$basePath/tags/$encodedTag"
 
     $localTag = @(Invoke-Git @('tag', '--list', $tag))
+    $tagCommit = $null
     if ($localTag.Count) {
         $tagCommit = (Invoke-Git @('rev-list', '-n', '1', $tag) | Select-Object -First 1).Trim()
-        if ($tagCommit -ne $head) { throw "Local tag $tag points to a different commit." }
     }
     $remoteTag = @(Invoke-Git @('ls-remote', '--tags', $Remote, "refs/tags/$tag", "refs/tags/$tag^{}"))
+    $remoteCommit = $null
     if ($remoteTag.Count) {
         $peeled = @($remoteTag | Where-Object { $_ -like "*refs/tags/$tag^{}" })
         $remoteCommit = if ($peeled.Count) { ($peeled[0] -split '\s+')[0] } else { ($remoteTag[0] -split '\s+')[0] }
-        if ($remoteCommit -ne $head) { throw "Remote tag $tag points to a different commit." }
+    }
+    if (($localTag.Count -gt 0) -ne ($remoteTag.Count -gt 0)) { throw "Local and remote tag $tag do not agree." }
+    if ($tagCommit -and $remoteCommit -ne $tagCommit) { throw "Local and remote tag $tag point to different commits." }
+    if ($tagCommit -and $tagCommit -ne $head) {
+        if ($existing.Status -eq 404 -or [string]::IsNullOrWhiteSpace($existing.Body) -or $existing.Body.Trim() -eq 'null') {
+            throw "Tag $tag points to an older commit, but no matching Gitee Release exists."
+        }
+        Invoke-Git @('merge-base', '--is-ancestor', $tagCommit, 'HEAD') | Out-Null
     }
     if (-not $localTag.Count) { Invoke-Git @('tag', $tag) | Out-Null }
     if (-not $remoteTag.Count) { Invoke-Git @('push', $Remote, "refs/tags/$tag") | Out-Null }
@@ -183,6 +216,11 @@ try {
     }
     Write-Host "Release: https://gitee.com/$Owner/$Repository/releases/tag/$tag"
     Write-Host "SHA-256: $hash"
+    if ($saveToken) {
+        $encryptedToken = ConvertFrom-SecureString $secureToken
+        [System.IO.File]::WriteAllText($envPath, "GITEE_TOKEN_DPAPI=$encryptedToken`r`n", [System.Text.UTF8Encoding]::new($false))
+        Write-Host "Gitee token saved for this Windows user: $envPath"
+    }
 } finally {
     $client.Dispose()
 }
