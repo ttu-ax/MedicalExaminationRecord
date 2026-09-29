@@ -170,12 +170,24 @@ try {
     $assetPath = "$basePath/$($release.id)/attach_files"
     $assets = Invoke-GiteeApi $client 'GET' $assetPath
     if ($assets.Status -eq 404) { throw 'Could not list Gitee Release attachments.' }
-    $existingAssets = @($assets.Body | ConvertFrom-Json)
-    $matchingAsset = @($existingAssets | Where-Object { $_.name -eq $apkName })
+    if ($saveToken) {
+        $encryptedToken = ConvertFrom-SecureString $secureToken
+        [System.IO.File]::WriteAllText($envPath, "GITEE_TOKEN_DPAPI=$encryptedToken`r`n", [System.Text.UTF8Encoding]::new($false))
+        Write-Host "Gitee token saved for this Windows user: $envPath"
+        $saveToken = $false
+    }
+    $existingAssets = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($item in ($assets.Body | ConvertFrom-Json)) { $existingAssets.Add($item) }
+    $matchingAsset = $null
+    foreach ($item in $existingAssets) {
+        if ($item.name -eq $apkName) { $matchingAsset = $item; break }
+    }
     $expectedApkUrl = "https://gitee.com/$Owner/$Repository/releases/download/$tag/$apkName"
-    if ($matchingAsset.Count) {
-        if ($matchingAsset[0].browser_download_url -ne $expectedApkUrl) { throw 'Existing APK download URL does not match this Release.' }
-        Write-Host "APK already attached: $($matchingAsset[0].browser_download_url)"
+    if ($matchingAsset) {
+        if ($matchingAsset.browser_download_url -ne $expectedApkUrl) {
+            throw "Existing APK download URL does not match this Release: $($matchingAsset.browser_download_url)"
+        }
+        Write-Host "APK already attached: $($matchingAsset.browser_download_url)"
     } else {
         $fileStream = [System.IO.File]::OpenRead($apkPath)
         $multipart = New-Object System.Net.Http.MultipartFormDataContent
@@ -192,10 +204,15 @@ try {
         }
     }
 
-    $matchingManifest = @($existingAssets | Where-Object { $_.name -eq 'update.json' })
+    $matchingManifest = $null
+    foreach ($item in $existingAssets) {
+        if ($item.name -eq 'update.json') { $matchingManifest = $item; break }
+    }
     $expectedManifestUrl = "https://gitee.com/$Owner/$Repository/releases/download/$tag/update.json"
-    if ($matchingManifest.Count) {
-        if ($matchingManifest[0].browser_download_url -ne $expectedManifestUrl) { throw 'Existing update manifest URL does not match this Release.' }
+    if ($matchingManifest) {
+        if ($matchingManifest.browser_download_url -ne $expectedManifestUrl) {
+            throw "Existing update manifest URL does not match this Release: $($matchingManifest.browser_download_url)"
+        }
         Write-Host "Update manifest already attached: $expectedManifestUrl"
     } else {
         $manifest.download_url = $expectedApkUrl
@@ -216,11 +233,6 @@ try {
     }
     Write-Host "Release: https://gitee.com/$Owner/$Repository/releases/tag/$tag"
     Write-Host "SHA-256: $hash"
-    if ($saveToken) {
-        $encryptedToken = ConvertFrom-SecureString $secureToken
-        [System.IO.File]::WriteAllText($envPath, "GITEE_TOKEN_DPAPI=$encryptedToken`r`n", [System.Text.UTF8Encoding]::new($false))
-        Write-Host "Gitee token saved for this Windows user: $envPath"
-    }
 } finally {
     $client.Dispose()
 }
