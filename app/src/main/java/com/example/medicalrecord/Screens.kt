@@ -1,9 +1,12 @@
 package com.example.medicalrecord
 
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +34,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -37,13 +44,17 @@ import java.io.File
 
 @Composable
 private fun SectionTitle(title: String, modifier: Modifier = Modifier) {
-    Text(title, modifier, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Text(title, modifier, style = MaterialTheme.typography.titleLarge)
 }
 
 @Composable
 private fun InfoCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Card(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) { content() }
+    Card(
+        modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MedicalPalette.Outline)
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) { content() }
     }
 }
 
@@ -57,78 +68,87 @@ fun Overview(
     val confirmed = reports.filter { it.status == "已确认" }
     val pending = reports.filter { it.status != "已确认" }
     val numericKeys = observations.filter { row -> confirmed.any { it.id == row.reportId } && row.number() != null }.map { it.indicatorKey }.distinct()
-    LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text("体检记录", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                    Text("把每次检查连成一条健康时间线", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("体检记录", style = MaterialTheme.typography.headlineMedium)
+                    Text("每一次检查，都有迹可循", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = onSettings) { Text("设置") }
+                TextButton(onClick = onSettings) { Text("设置  ›") }
             }
         }
         item {
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("接下来", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = MedicalPalette.DeepTeal)) {
+                Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("下一步  ·  健康档案", style = MaterialTheme.typography.labelLarge, color = Color(0xFFA6DDC9))
                     Text(
                         when {
                             pending.isNotEmpty() -> "还有 ${pending.size} 份报告待校对"
                             reports.isEmpty() -> "导入第一份体检报告"
                             else -> "记录下一次检查"
                         },
-                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold
+                        style = MaterialTheme.typography.headlineSmall, color = Color.White
                     )
                     Text(
                         when {
                             pending.isNotEmpty() -> "核对日期、数值和参考范围后，指标才会进入趋势图。"
                             else -> "选择报告照片，识别后逐项确认。"
                         },
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        color = Color(0xFFD5E8E1), style = MaterialTheme.typography.bodyMedium
                     )
-                    if (pending.isNotEmpty()) Button(onClick = { onReport(pending.first().id) }, modifier = Modifier.fillMaxWidth()) { Text("继续校对") }
-                    else Button(onClick = onPick, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("选择报告图片") }
+                    if (pending.isNotEmpty()) Button(
+                        onClick = { onReport(pending.first().id) }, modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = MedicalPalette.DeepTeal)
+                    ) { Text("继续校对  →") }
+                    else Button(
+                        onClick = onPick, enabled = !busy, modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = MedicalPalette.DeepTeal)
+                    ) { Text("选择报告图片  →") }
+                    Text("导入  ━  校对  ━  查看趋势", color = Color(0xFFA6DDC9), style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onPick, enabled = !busy, modifier = Modifier.weight(1f)) { Text("从相册导入") }
                 OutlinedButton(onClick = onCamera, enabled = !busy, modifier = Modifier.weight(1f)) { Text("拍照导入") }
             }
-            if (!hasKey) Text("首次识别需要填写 API Key；选图后会自动引导设置。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (notice.isNotBlank()) Text(notice, color = MaterialTheme.colorScheme.primary)
+            if (!hasKey) Text("首次识别需配置 API Key，选图后会引导设置。", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            if (notice.isNotBlank()) Text(notice, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.primary)
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 InfoCard(Modifier.weight(1f).clickable(onClick = onReports)) {
-                    Text("${reports.size}", style = MaterialTheme.typography.headlineSmall)
-                    Text("份报告  ›")
+                    Text("${reports.size}", style = MaterialTheme.typography.headlineMedium, color = MedicalPalette.DeepTeal)
+                    Text("报告档案  ↗", color = MedicalPalette.Muted)
                 }
                 InfoCard(Modifier.weight(1f).clickable(onClick = onTrends)) {
-                    Text("${numericKeys.size}", style = MaterialTheme.typography.headlineSmall)
-                    Text("项趋势  ›")
+                    Text("${numericKeys.size}", style = MaterialTheme.typography.headlineMedium, color = MedicalPalette.DeepTeal)
+                    Text("追踪指标  ↗", color = MedicalPalette.Muted)
                 }
             }
         }
         val recent = observations.filter { row -> confirmed.any { it.id == row.reportId } }.groupBy { it.indicatorKey }.values.mapNotNull { rows -> rows.maxByOrNull { row -> confirmed.find { it.id == row.reportId }?.sampleDate ?: "" } }.take(3)
         if (recent.isNotEmpty()) {
-            item { SectionTitle("最近关注的指标") }
+            item { SectionTitle("最近指标") }
             items(recent, key = { it.indicatorKey }) { row ->
                 InfoCard(Modifier.clickable { onIndicator(row.indicatorKey) }) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(row.indicatorKey, fontWeight = FontWeight.Medium)
-                        Text("${row.value} ${row.unit}", color = MaterialTheme.colorScheme.primary)
+                        Text(row.indicatorKey, fontWeight = FontWeight.SemiBold)
+                        Text("${row.value} ${row.unit}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     }
+                    Text("查看完整趋势  ›", color = MedicalPalette.Muted, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
         item {
             InfoCard(Modifier.clickable(onClick = onStages)) {
-                Text("阶段记录  ›", fontWeight = FontWeight.SemiBold)
-                Text(if (stages.isEmpty()) "记录饮食、运动或用药变化，与指标趋势对照。" else "${stages.first().title} · ${stages.first().startDate} 起")
+                Text("阶段时间线  ›", fontWeight = FontWeight.SemiBold, color = MedicalPalette.DeepTeal)
+                Text(if (stages.isEmpty()) "记录饮食、运动或用药变化，与指标趋势对照。" else stages.maxByOrNull { it.startDate }!!.let { "${it.title} · ${it.startDate} 起" }, color = MedicalPalette.Muted)
             }
         }
+        item { Spacer(Modifier.height(8.dp)) }
     }
 }
 
@@ -141,23 +161,29 @@ fun ReportsScreen(
     var adding by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     val allCategories = (categories + reports.map { it.category }).distinct().sorted()
-    LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
+            Spacer(Modifier.height(20.dp))
             SectionTitle("报告分类")
-            Text("识别结果会先按报告类型归类，也可以创建自己的分类。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("按类型整理每次检查，随时回看和比较。", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onPick, enabled = !busy) { Text("导入报告") }
-                OutlinedButton(onClick = onCamera, enabled = !busy) { Text("拍照") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onPick, enabled = !busy, modifier = Modifier.weight(1f)) { Text("＋ 导入报告") }
+                OutlinedButton(onClick = onCamera, enabled = !busy, modifier = Modifier.weight(1f)) { Text("拍照导入") }
             }
-            Row {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { adding = true }) { Text("＋ 新建分类") }
                 TextButton(onClick = onManual) { Text("手工录入") }
             }
             if (notice.isNotEmpty()) Text(notice, color = MaterialTheme.colorScheme.primary)
         }
-        if (allCategories.isEmpty()) item { Text("暂无分类。导入报告后会自动创建，或点击“新建分类”。") }
+        if (allCategories.isEmpty()) item {
+            InfoCard {
+                Text("还没有报告分类", fontWeight = FontWeight.SemiBold)
+                Text("导入第一份报告后会自动归类，也可以先新建一个分类。", color = MedicalPalette.Muted)
+            }
+        }
         items(allCategories, key = { it }) { category ->
             val count = reports.count { it.category == category }
             val pending = reports.count { it.category == category && it.status != "已确认" }
@@ -165,13 +191,20 @@ fun ReportsScreen(
             val trendCount = observations.filter { it.reportId in confirmedIds && it.value.trim().replace(",", "").toDoubleOrNull() != null }
                 .map { it.indicatorKey }.distinct().size
             InfoCard(Modifier.clickable { onOpenCategory(category) }) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(category, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("›", color = MaterialTheme.colorScheme.primary)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(44.dp).background(MedicalPalette.Mint, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                        Text(category.take(1), color = MedicalPalette.DeepTeal, style = MaterialTheme.typography.titleMedium)
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(category, style = MaterialTheme.typography.titleMedium)
+                        Text("$count 份报告 · $trendCount 项趋势", color = MedicalPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("›", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge)
                 }
-                Text("$count 份报告 · $trendCount 项趋势" + if (pending > 0) " · $pending 份待校对" else "")
+                if (pending > 0) Text("$pending 份待校对", color = MedicalPalette.Amber, style = MaterialTheme.typography.labelMedium)
             }
         }
+        item { Spacer(Modifier.height(8.dp)) }
     }
     if (adding) AlertDialog(
         onDismissRequest = { adding = false; newName = "" },

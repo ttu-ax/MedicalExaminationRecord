@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,18 +27,41 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
+
+private data class DuplicateReview(
+    val newReport: Report,
+    val existingReports: List<Report>,
+    val decision: ArrayBlockingQueue<Boolean>
+)
+
+private fun matchingReports(newReport: Report, existing: List<Report>): List<Report> {
+    val date = newReport.sampleDate.ifBlank { newReport.reportDate }
+    if (!validDate(date)) return emptyList()
+    return existing.filter { report ->
+        report.category.trim() == newReport.category.trim() &&
+            report.sampleDate.ifBlank { report.reportDate } == date
+    }
+}
 
 class MainActivity : ComponentActivity() {
     private lateinit var db: RecordDb
+    @Volatile private var pendingDuplicateDecision: ArrayBlockingQueue<Boolean>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         db = RecordDb(this)
         setContent { MedicalRecordTheme { App() } }
+    }
+
+    override fun onDestroy() {
+        pendingDuplicateDecision?.offer(false)
+        super.onDestroy()
     }
 
     @Composable
@@ -60,6 +84,7 @@ class MainActivity : ComponentActivity() {
         var hasKey by remember { mutableStateOf(keyStore.read().isNotBlank()) }
         var pendingUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
         var progress by remember { mutableStateOf<RecognitionProgress?>(null) }
+        var duplicateReview by remember { mutableStateOf<DuplicateReview?>(null) }
 
         fun goBack() {
             when {
@@ -102,6 +127,7 @@ class MainActivity : ComponentActivity() {
             progress = RecognitionProgress(1, uris.size, 0, "准备图片")
             Thread {
                 var succeeded = 0
+                var skipped = 0
                 val importedIds = mutableListOf<Long>()
                 val failures = mutableListOf<String>()
                 uris.forEachIndexed { index, uri ->
@@ -112,8 +138,23 @@ class MainActivity : ComponentActivity() {
                         val recognized = recognizeImage(path, apiKey,
                             onStage = { stage -> runOnUiThread { progress = progress?.copy(stage = stage) } },
                             onStream = { stream -> runOnUiThread { progress = progress?.copy(stream = stream) } })
-                        importedIds.add(db.addReport(recognized.report, recognized.observations))
-                        succeeded++
+                        val matches = matchingReports(recognized.report, db.reports())
+                        val shouldImport = if (matches.isEmpty()) true else {
+                            val decision = ArrayBlockingQueue<Boolean>(1)
+                            pendingDuplicateDecision = decision
+                            runOnUiThread {
+                                progress = progress?.copy(stage = "发现同日同类报告，等待图片核对")
+                                duplicateReview = DuplicateReview(recognized.report, matches, decision)
+                            }
+                            try { decision.take() } finally { pendingDuplicateDecision = null }
+                        }
+                        if (shouldImport) {
+                            importedIds.add(db.addReport(recognized.report, recognized.observations))
+                            succeeded++
+                        } else {
+                            File(path).delete()
+                            skipped++
+                        }
                     } catch (error: Exception) {
                         if (path.isNotEmpty()) {
                             db.addReport(Report(0, "其他", "", "", "", path, "识别失败", ""), emptyList())
@@ -132,7 +173,9 @@ class MainActivity : ComponentActivity() {
                     reviewQueue = importedIds
                     selectedReport = importedIds.firstOrNull()
                     selectedCategory = reports.firstOrNull { it.id == selectedReport }?.category
-                    notice = "已识别 $succeeded/${uris.size} 张。" + if (failures.isEmpty()) "请逐份校对。" else "失败 ${failures.size} 张，详情见识别进度。"
+                    notice = "已导入 $succeeded/${uris.size} 张。" +
+                        (if (skipped > 0) "跳过重复图片 $skipped 张。" else "") +
+                        (if (failures.isEmpty()) { if (succeeded > 0) "请逐份校对。" else "" } else "失败 ${failures.size} 张，详情见识别进度。")
                     progress = progress?.copy(stage = notice, error = failures.joinToString("；"), active = false)
                 }
             }.start()
@@ -154,13 +197,25 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(bottomBar = {
             if (selectedReport == null && selectedIndicator == null && tab != 3) {
-                NavigationBar {
+                NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
                     listOf("首页", "报告", "阶段").forEachIndexed { index, label ->
-                        NavigationBarItem(selected = tab == index, onClick = { tab = index; if (index != 1) selectedCategory = null }, icon = { Text(listOf("⌂", "▤", "◇")[index]) }, label = { Text(label) })
+                        NavigationBarItem(
+                            selected = tab == index,
+                            onClick = { tab = index; if (index != 1) selectedCategory = null },
+                            icon = { NavigationGlyph(index, tab == index) },
+                            label = { Text(label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MedicalPalette.Teal,
+                                selectedTextColor = MedicalPalette.Teal,
+                                indicatorColor = MedicalPalette.Mint,
+                                unselectedIconColor = MedicalPalette.Muted,
+                                unselectedTextColor = MedicalPalette.Muted
+                            )
+                        )
                     }
                 }
             }
-        }) { padding ->
+        }, containerColor = MedicalPalette.Canvas) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 progress?.let { RecognitionProgressCard(it) { progress = null } }
                 if (selectedReport != null) {
@@ -227,7 +282,15 @@ class MainActivity : ComponentActivity() {
                 } else when (tab) {
                     0 -> Overview(reports, observations, stages, busy, notice, hasKey,
                         ::selectPhotos, ::takePhoto, { id -> tab = 1; categoryView = "报告"; selectedReport = id; selectedCategory = reports.firstOrNull { it.id == id }?.category }, { selectedIndicator = it },
-                        onReports = { tab = 1; selectedCategory = null }, onTrends = { tab = 1; selectedCategory = null }, onStages = { tab = 2 }, onSettings = { tab = 3 })
+                        onReports = { tab = 1; selectedCategory = null },
+                        onTrends = {
+                            tab = 1
+                            selectedCategory = reports.firstOrNull { report ->
+                                report.status == "已确认" && observations.any { it.reportId == report.id && it.number() != null }
+                            }?.category
+                            categoryView = "趋势"
+                        },
+                        onStages = { tab = 2 }, onSettings = { tab = 3 })
                     1 -> if (selectedCategory == null) ReportsScreen(
                         reports, observations, categories, busy, notice, ::selectPhotos, ::takePhoto,
                         onOpenCategory = { selectedCategory = it; categoryView = "报告" },
@@ -268,6 +331,12 @@ class MainActivity : ComponentActivity() {
                         },
                         onClear = { keyStore.clear(); hasKey = false; notice = "API Key 已清除" })
                 }
+            }
+        }
+        duplicateReview?.let { review ->
+            DuplicateReportReview(review.newReport, review.existingReports) { shouldImport ->
+                review.decision.offer(shouldImport)
+                duplicateReview = null
             }
         }
     }

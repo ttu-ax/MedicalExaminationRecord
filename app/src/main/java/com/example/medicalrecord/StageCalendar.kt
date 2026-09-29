@@ -1,6 +1,7 @@
 package com.example.medicalrecord
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -123,77 +125,82 @@ fun StagesScreen(stages: List<Stage>, onAdd: (Stage) -> Unit, onUpdate: (Stage) 
                 val end = stage.lastDay() ?: return@filter false
                 start <= month.atEndOfMonth() && end >= firstOfMonth
             }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(month.format(monthTitle), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Row(Modifier.fillMaxWidth()) {
-                    listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
-                        Text(label, Modifier.weight(1f), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                repeat(weekCount) { weekIndex ->
-            val weekStart = calendarStart.plusDays((weekIndex * 7).toLong())
-            Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth()) {
-                    repeat(7) { dayIndex ->
-                        val day = weekStart.plusDays(dayIndex.toLong())
-                        val selected = day == selectionStart
-                        Box(
-                            Modifier.weight(1f).height(44.dp)
-                                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
-                                .clickable(enabled = YearMonth.from(day) == month) { chooseDate(day) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                day.dayOfMonth.toString(),
-                                color = when {
-                                    selected -> MaterialTheme.colorScheme.primary
-                                    YearMonth.from(day) != month -> Color.Transparent
-                                    day == LocalDate.now() -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.onSurface
-                                },
-                                fontWeight = if (day == LocalDate.now() || selected) FontWeight.Bold else FontWeight.Normal
-                            )
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MedicalPalette.Outline)
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(month.format(monthTitle), style = MaterialTheme.typography.titleLarge)
+                    Row(Modifier.fillMaxWidth()) {
+                        listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
+                            Text(label, Modifier.weight(1f), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                }
-                val weekStages = stages.filter { stage ->
-                    val start = stage.firstDay() ?: return@filter false
-                    val end = stage.lastDay() ?: return@filter false
-                    start <= minOf(weekStart.plusDays(6), month.atEndOfMonth()) && end >= maxOf(weekStart, firstOfMonth)
-                }
-                for (lane in 0..(weekStages.maxOfOrNull { lanes[it.id] ?: 0 } ?: -1)) {
-                    val laneStages = weekStages.filter { lanes[it.id] == lane }
-                    BoxWithConstraints(Modifier.fillMaxWidth().height(25.dp)) {
-                        laneStages.forEach { stage ->
-                    val start = stage.firstDay()!!.coerceAtLeast(weekStart).coerceAtLeast(firstOfMonth)
-                    val end = stage.lastDay()!!.coerceAtMost(weekStart.plusDays(6)).coerceAtMost(month.atEndOfMonth())
-                    val left = (start.toEpochDay() - weekStart.toEpochDay()).toInt()
-                    val span = (end.toEpochDay() - start.toEpochDay() + 1).toInt()
-                        Box(
-                            Modifier.offset(x = maxWidth / 7 * left).width(maxWidth / 7 * span)
-                                .height(23.dp).background(stageColor(stage.category), RoundedCornerShape(5.dp))
-                                .clickable { editing = stage }.padding(horizontal = 5.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(stage.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                    repeat(weekCount) { weekIndex ->
+                        val weekStart = calendarStart.plusDays((weekIndex * 7).toLong())
+                        Column(Modifier.fillMaxWidth()) {
+                            Row(Modifier.fillMaxWidth()) {
+                                repeat(7) { dayIndex ->
+                                    val day = weekStart.plusDays(dayIndex.toLong())
+                                    val selected = day == selectionStart
+                                    Box(
+                                        Modifier.weight(1f).height(44.dp)
+                                            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
+                                            .clickable(enabled = YearMonth.from(day) == month) { chooseDate(day) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            day.dayOfMonth.toString(),
+                                            color = when {
+                                                selected -> MaterialTheme.colorScheme.primary
+                                                YearMonth.from(day) != month -> Color.Transparent
+                                                day == LocalDate.now() -> MaterialTheme.colorScheme.primary
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            },
+                                            fontWeight = if (day == LocalDate.now() || selected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                }
+                            }
+                            val weekStages = stages.filter { stage ->
+                                val start = stage.firstDay() ?: return@filter false
+                                val end = stage.lastDay() ?: return@filter false
+                                start <= minOf(weekStart.plusDays(6), month.atEndOfMonth()) && end >= maxOf(weekStart, firstOfMonth)
+                            }
+                            for (lane in 0..(weekStages.maxOfOrNull { lanes[it.id] ?: 0 } ?: -1)) {
+                                BoxWithConstraints(Modifier.fillMaxWidth().height(25.dp)) {
+                                    weekStages.filter { lanes[it.id] == lane }.forEach { stage ->
+                                        val start = stage.firstDay()!!.coerceAtLeast(weekStart).coerceAtLeast(firstOfMonth)
+                                        val end = stage.lastDay()!!.coerceAtMost(weekStart.plusDays(6)).coerceAtMost(month.atEndOfMonth())
+                                        val left = (start.toEpochDay() - weekStart.toEpochDay()).toInt()
+                                        val span = (end.toEpochDay() - start.toEpochDay() + 1).toInt()
+                                        Box(
+                                            Modifier.offset(x = maxWidth / 7 * left).width(maxWidth / 7 * span)
+                                                .height(23.dp).background(stageColor(stage.category), RoundedCornerShape(5.dp))
+                                                .clickable { editing = stage }.padding(horizontal = 5.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Text(stage.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
                         }
+                    }
+                    if (inMonth.isNotEmpty()) {
+                        Text("本月阶段 · ${inMonth.size}", style = MaterialTheme.typography.labelLarge, color = MedicalPalette.Muted)
+                        inMonth.forEach { stage ->
+                            Row(Modifier.fillMaxWidth().clickable { editing = stage }.padding(vertical = 7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(stage.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+                                Text(stage.category, color = MedicalPalette.Muted)
+                            }
                         }
                     }
                 }
             }
         }
-                Text("本月阶段（${inMonth.size}）", style = MaterialTheme.typography.titleMedium)
-                inMonth.forEach { stage ->
-            Card(Modifier.fillMaxWidth().clickable { editing = stage }) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(stage.title, fontWeight = FontWeight.SemiBold)
-                    Text("${stage.category} · ${stage.startDate} — ${stage.endDate.ifBlank { "至今" }}")
-                }
-            }
-        }
-            }
-        }
-        item { Text("已显示前后各 12 个月及所有已有阶段所在月份", Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("可查看前后各 12 个月及已有阶段所在月份", Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
     }
     editing?.let { stage ->
