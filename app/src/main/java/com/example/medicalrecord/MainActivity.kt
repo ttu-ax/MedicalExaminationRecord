@@ -34,12 +34,15 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+private const val MAX_IMPORT_CONCURRENCY = 10
 
 private data class DuplicateReview(
+    val index: Int,
     val newReport: Report,
-    val existingReports: List<Report>,
-    val decision: ArrayBlockingQueue<Boolean>
+    val existingReports: List<Report>
 )
 
 private fun matchingReports(newReport: Report, existing: List<Report>): List<Report> {
@@ -53,7 +56,7 @@ private fun matchingReports(newReport: Report, existing: List<Report>): List<Rep
 
 class MainActivity : ComponentActivity() {
     private lateinit var db: RecordDb
-    @Volatile private var pendingDuplicateDecision: ArrayBlockingQueue<Boolean>? = null
+    private var importWorkers: ExecutorService = Executors.newFixedThreadPool(5)
     private var availableUpdate by mutableStateOf<AppUpdate?>(null)
     private var updateDownloading by mutableStateOf(false)
     private var updateMessage by mutableStateOf("")
@@ -103,7 +106,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        pendingDuplicateDecision?.offer(false)
+        importWorkers.shutdownNow()
         super.onDestroy()
     }
 
@@ -127,6 +130,15 @@ class MainActivity : ComponentActivity() {
         var hasKey by remember { mutableStateOf(keyStore.read().isNotBlank()) }
         var pendingUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
         var progress by remember { mutableStateOf<RecognitionProgress?>(null) }
+        var importItems by remember { mutableStateOf<List<ImportImageItem>>(emptyList()) }
+        var importSources by remember { mutableStateOf<List<Uri>>(emptyList()) }
+        var importVisible by remember { mutableStateOf(false) }
+        var importConcurrency by remember {
+            mutableStateOf(getSharedPreferences("image-import", MODE_PRIVATE).getInt("concurrency", 5).coerceIn(1, MAX_IMPORT_CONCURRENCY))
+        }
+        val pendingResults = remember { mutableMapOf<Int, RecognizedReport>() }
+        val pendingMatches = remember { mutableMapOf<Int, List<Report>>() }
+        val skippedPaths = remember { mutableListOf<String>() }
         var duplicateReview by remember { mutableStateOf<DuplicateReview?>(null) }
         val currentVersion = remember { packageManager.getPackageInfo(packageName, 0).versionName ?: "未知" }
 
@@ -157,6 +169,61 @@ class MainActivity : ComponentActivity() {
             categories = db.categories()
         }
 
+        fun finishImportIfReady() {
+            if (importItems.isEmpty() || importItems.any { it.status == ImportImageStatus.Waiting || it.status == ImportImageStatus.Working || it.status == ImportImageStatus.Duplicate }) return
+            busy = false
+            val imported = importItems.count { it.status == ImportImageStatus.Imported }
+            val skipped = importItems.count { it.status == ImportImageStatus.Skipped }
+            val failed = importItems.count { it.status == ImportImageStatus.Failed }
+            notice = "已导入 $imported/${importItems.size} 张。" +
+                (if (skipped > 0) "跳过重复图片 $skipped 张。" else "") +
+                (if (failed > 0) "失败 $failed 张，可在导入面板中重试。" else if (imported > 0) "请逐份校对。" else "")
+        }
+
+        fun updateImportItem(index: Int, change: (ImportImageItem) -> ImportImageItem) {
+            importItems = importItems.map { if (it.index == index) change(it) else it }
+            finishImportIfReady()
+        }
+
+        fun recognizeImportItem(index: Int, source: Uri, apiKey: String) {
+            importWorkers.execute {
+                var path = importItems.firstOrNull { it.index == index }?.path.orEmpty()
+                try {
+                    if (path.isBlank()) {
+                        runOnUiThread { updateImportItem(index) { it.copy(status = ImportImageStatus.Working, stage = "读取图片") } }
+                        path = copyImage(this, source)
+                    }
+                    val imagePath = path
+                    runOnUiThread { updateImportItem(index) { it.copy(path = imagePath, status = ImportImageStatus.Working, stage = "准备识别") } }
+                    val recognized = recognizeImage(imagePath, apiKey,
+                        onStage = { stage -> runOnUiThread { updateImportItem(index) { it.copy(stage = stage) } } },
+                        onStream = { stream -> runOnUiThread { updateImportItem(index) { it.copy(stream = stream) } } })
+                    runOnUiThread {
+                        try {
+                            val matches = matchingReports(recognized.report, db.reports() + pendingResults.values.map { it.report })
+                            if (matches.isNotEmpty()) {
+                                pendingResults[index] = recognized
+                                pendingMatches[index] = matches
+                                updateImportItem(index) { it.copy(status = ImportImageStatus.Duplicate, stage = "待确认重复报告", itemCount = recognized.observations.size) }
+                            } else {
+                                val id = db.addReport(recognized.report, recognized.observations)
+                                reviewQueue = reviewQueue + id
+                                refresh()
+                                updateImportItem(index) { it.copy(status = ImportImageStatus.Imported, stage = "已导入，待校对", reportId = id, itemCount = recognized.observations.size) }
+                            }
+                        } catch (error: Exception) {
+                            updateImportItem(index) { it.copy(status = ImportImageStatus.Failed, stage = "导入失败", error = error.message?.take(250) ?: "未知错误") }
+                        }
+                    }
+                } catch (error: Exception) {
+                    val failedPath = path
+                    runOnUiThread {
+                        updateImportItem(index) { it.copy(path = failedPath, status = ImportImageStatus.Failed, stage = "识别失败", error = error.message?.take(250) ?: "未知错误") }
+                    }
+                }
+            }
+        }
+
         fun importUris(uris: List<Uri>) {
             if (uris.isEmpty() || busy) return
             val apiKey = keyStore.read()
@@ -168,61 +235,19 @@ class MainActivity : ComponentActivity() {
             }
             busy = true
             notice = "正在识别 ${uris.size} 张报告…"
-            progress = RecognitionProgress(1, uris.size, 0, "准备图片")
-            Thread {
-                var succeeded = 0
-                var skipped = 0
-                val importedIds = mutableListOf<Long>()
-                val failures = mutableListOf<String>()
-                uris.forEachIndexed { index, uri ->
-                    var path = ""
-                    try {
-                        runOnUiThread { progress = RecognitionProgress(index + 1, uris.size, index, "读取图片") }
-                        path = copyImage(this, uri)
-                        val recognized = recognizeImage(path, apiKey,
-                            onStage = { stage -> runOnUiThread { progress = progress?.copy(stage = stage) } },
-                            onStream = { stream -> runOnUiThread { progress = progress?.copy(stream = stream) } })
-                        val matches = matchingReports(recognized.report, db.reports())
-                        val shouldImport = if (matches.isEmpty()) true else {
-                            val decision = ArrayBlockingQueue<Boolean>(1)
-                            pendingDuplicateDecision = decision
-                            runOnUiThread {
-                                progress = progress?.copy(stage = "发现同日同类报告，等待图片核对")
-                                duplicateReview = DuplicateReview(recognized.report, matches, decision)
-                            }
-                            try { decision.take() } finally { pendingDuplicateDecision = null }
-                        }
-                        if (shouldImport) {
-                            importedIds.add(db.addReport(recognized.report, recognized.observations))
-                            succeeded++
-                        } else {
-                            File(path).delete()
-                            skipped++
-                        }
-                    } catch (error: Exception) {
-                        if (path.isNotEmpty()) {
-                            db.addReport(Report(0, "其他", "", "", "", path, "识别失败", ""), emptyList())
-                        }
-                        val message = error.message?.take(250) ?: "未知错误"
-                        failures.add("第 ${index + 1} 张：$message")
-                        runOnUiThread { progress = progress?.copy(error = message) }
-                    }
-                    runOnUiThread { progress = progress?.copy(completed = index + 1, stage = "已处理 ${index + 1}/${uris.size} 张") }
-                }
-                runOnUiThread {
-                    refresh()
-                    busy = false
-                    tab = 1
-                    categoryView = "报告"
-                    reviewQueue = importedIds
-                    selectedReport = importedIds.firstOrNull()
-                    selectedCategory = reports.firstOrNull { it.id == selectedReport }?.category
-                    notice = "已导入 $succeeded/${uris.size} 张。" +
-                        (if (skipped > 0) "跳过重复图片 $skipped 张。" else "") +
-                        (if (failures.isEmpty()) { if (succeeded > 0) "请逐份校对。" else "" } else "失败 ${failures.size} 张，详情见识别进度。")
-                    progress = progress?.copy(stage = notice, error = failures.joinToString("；"), active = false)
-                }
-            }.start()
+            importItems.filter { it.status == ImportImageStatus.Failed }.forEach { item ->
+                if (item.path.isNotBlank()) File(item.path).delete()
+            }
+            skippedPaths.forEach { File(it).delete() }
+            pendingResults.clear()
+            pendingMatches.clear()
+            skippedPaths.clear()
+            importSources = uris.take(10)
+            importItems = importSources.mapIndexed { index, _ -> ImportImageItem(index) }
+            importVisible = true
+            importWorkers.shutdown()
+            importWorkers = Executors.newFixedThreadPool(minOf(importConcurrency, importSources.size))
+            importSources.forEachIndexed { index, uri -> recognizeImportItem(index, uri, apiKey) }
         }
 
         val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris -> importUris(uris) }
@@ -239,7 +264,11 @@ class MainActivity : ComponentActivity() {
             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
 
-        Scaffold(bottomBar = {
+        Scaffold(floatingActionButton = {
+            if (importItems.isNotEmpty() && !importVisible && duplicateReview == null) {
+                ImportBatchBanner(importItems) { importVisible = true }
+            }
+        }, bottomBar = {
             if (selectedReport == null && selectedIndicator == null && tab != 3) {
                 NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
                     listOf("首页", "报告", "阶段").forEachIndexed { index, label ->
@@ -361,7 +390,12 @@ class MainActivity : ComponentActivity() {
                         onAdd = { db.addStage(it); refresh() },
                         onUpdate = { db.updateStage(it); refresh() },
                         onDelete = { db.deleteStage(it); refresh() })
-                    else -> SettingsScreen(hasKey, currentVersion, updateChecking, updateCheckStatus, onCheckUpdate = { checkForUpdates(manual = true) }, onBack = ::goBack,
+                    else -> SettingsScreen(hasKey, currentVersion, updateChecking, updateCheckStatus, importConcurrency,
+                        onImportConcurrencyChange = { count ->
+                            importConcurrency = count.coerceIn(1, MAX_IMPORT_CONCURRENCY)
+                            getSharedPreferences("image-import", MODE_PRIVATE).edit().putInt("concurrency", importConcurrency).apply()
+                        },
+                        onCheckUpdate = { checkForUpdates(manual = true) }, onBack = ::goBack,
                         onSave = { key ->
                             keyStore.save(key)
                             hasKey = true
@@ -377,9 +411,64 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (duplicateReview == null) progress?.let { RecognitionProgressCard(it) { progress = null } }
+        if (importVisible && duplicateReview == null && importItems.isNotEmpty()) {
+            ImportBatchCard(
+                importItems,
+                onCollapse = { importVisible = false },
+                onClose = {
+                    importItems.filter { it.status == ImportImageStatus.Failed }.forEach { item ->
+                        if (item.path.isNotBlank()) File(item.path).delete()
+                    }
+                    skippedPaths.forEach { File(it).delete() }
+                    skippedPaths.clear()
+                    importItems = emptyList()
+                    importSources = emptyList()
+                    importVisible = false
+                },
+                onReviewDuplicate = { index ->
+                    val result = pendingResults[index]
+                    val matches = pendingMatches[index]
+                    if (result != null && matches != null) duplicateReview = DuplicateReview(index, result.report, matches)
+                },
+                onRetry = { index ->
+                    val source = importSources.getOrNull(index)
+                    if (source != null) {
+                        busy = true
+                        updateImportItem(index) { it.copy(status = ImportImageStatus.Waiting, stage = "等待重试", stream = "", error = "", itemCount = 0) }
+                        recognizeImportItem(index, source, keyStore.read())
+                    }
+                },
+                onReviewReports = {
+                    val id = reviewQueue.firstOrNull() ?: importItems.firstNotNullOfOrNull { it.reportId }
+                    if (id != null) {
+                        tab = 1
+                        categoryView = "报告"
+                        selectedReport = id
+                        selectedCategory = reports.firstOrNull { it.id == id }?.category
+                        importVisible = false
+                    }
+                }
+            )
+        }
         duplicateReview?.let { review ->
             DuplicateReportReview(review.newReport, review.existingReports) { shouldImport ->
-                review.decision.offer(shouldImport)
+                val result = pendingResults.remove(review.index)
+                pendingMatches.remove(review.index)
+                if (result != null) {
+                    if (shouldImport) {
+                        runCatching { db.addReport(result.report, result.observations) }
+                            .onSuccess { id ->
+                                reviewQueue = reviewQueue + id
+                                refresh()
+                                updateImportItem(review.index) { it.copy(status = ImportImageStatus.Imported, stage = "已导入，待校对", reportId = id) }
+                            }.onFailure { error ->
+                                updateImportItem(review.index) { it.copy(status = ImportImageStatus.Failed, stage = "导入失败", error = error.message?.take(250) ?: "未知错误") }
+                            }
+                    } else {
+                        skippedPaths.add(result.report.imagePath)
+                        updateImportItem(review.index) { it.copy(status = ImportImageStatus.Skipped, stage = "已跳过重复图片") }
+                    }
+                }
                 duplicateReview = null
             }
         }

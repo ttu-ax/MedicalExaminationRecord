@@ -21,6 +21,7 @@ private const val MODEL_BASE_URL = "https://llm-nznju0c9y94pes1q.cn-beijing.maas
 private const val VISION_MODEL = "qwen3.7-flash"
 private val reportTypes = setOf("血常规", "生化", "凝血", "其他")
 private val datePattern = Regex("(\\d{4})[-年/.](\\d{1,2})[-月/.](\\d{1,2})")
+private val imageEncodingLock = Any()
 private const val PROMPT = """你是检验报告逐字转录助手。读取这一张报告图片，仅返回 JSON 对象。
 不要诊断、推断、解释或补充常见正常值。不要提取姓名、病历号等身份信息。
 格式：{"report_type":"血常规|生化|凝血|其他", "suggested_category":"建议分类名或空字符串", "sample_date":"YYYY-MM-DD 或空字符串", "report_date":"YYYY-MM-DD 或空字符串", "institution":"报告上可见机构或空字符串", "observations":[{"name":"报告项目原文", "value":"结果原文", "unit":"单位原文或空字符串", "reference":"参考范围原文或空字符串", "flag":"报告提示↑、↓或空字符串"}]}。
@@ -73,14 +74,26 @@ private fun normalizedDate(value: Any?): String {
     catch (_: Exception) { "" }
 }
 
-private fun imageBase64(path: String): String {
-    val original = BitmapFactory.decodeFile(path) ?: throw IllegalArgumentException("无法读取报告图片")
-    val scale = minOf(1f, 2600f / maxOf(original.width, original.height))
-    val image = if (scale < 1f) Bitmap.createScaledBitmap(original, (original.width * scale).toInt(), (original.height * scale).toInt(), true) else original
-    val bytes = ByteArrayOutputStream().use { stream -> image.compress(Bitmap.CompressFormat.JPEG, 85, stream); stream.toByteArray() }
-    if (image !== original) image.recycle()
-    original.recycle()
-    return Base64.encodeToString(bytes, Base64.NO_WRAP)
+private fun imageBase64(path: String): String = synchronized(imageEncodingLock) {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    require(bounds.outWidth > 0 && bounds.outHeight > 0) { "无法读取报告图片" }
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 3200) sample *= 2
+    val original = BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+        ?: throw IllegalArgumentException("无法读取报告图片")
+    try {
+        val scale = minOf(1f, 2600f / maxOf(original.width, original.height))
+        val image = if (scale < 1f) Bitmap.createScaledBitmap(original, (original.width * scale).toInt().coerceAtLeast(1), (original.height * scale).toInt().coerceAtLeast(1), true) else original
+        try {
+            val bytes = ByteArrayOutputStream().use { stream -> image.compress(Bitmap.CompressFormat.JPEG, 85, stream); stream.toByteArray() }
+            Base64.encodeToString(bytes, Base64.NO_WRAP)
+        } finally {
+            if (image !== original) image.recycle()
+        }
+    } finally {
+        original.recycle()
+    }
 }
 
 fun recognizeImage(path: String, apiKey: String, onStage: (String) -> Unit, onStream: (String) -> Unit): RecognizedReport {

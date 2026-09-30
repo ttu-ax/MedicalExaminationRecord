@@ -1,14 +1,14 @@
 {
     "app_name":  "体检记录",
     "package_name":  "com.example.medicalrecord",
-    "version_name":  "0.5.6",
-    "version_code":  11,
+    "version_name":  "0.5.7",
+    "version_code":  12,
     "minimum_supported_version_code":  1,
     "force_update":  false,
-    "published_at":  "2026-09-29T16:20:07Z",
+    "published_at":  "2026-09-30T15:43:18Z",
     "release_notes":  [
-                          "增加gitee更新源"
+                          "增加图片的并发识别"
                       ],
-    "download_url":  "https://acupofttu.top/downloads/medical-record-v0.5.6.apk",
-    "sha256":  "ca7332095f68b6336dd673434eb15681a633d7157d1b4bff5fe6ee8e5eb83e98"
+    "download_url":  "https://acupofttu.top/downloads/medical-record-v0.5.7.apk",
+    "sha256":  "6d4e885971a7bb3d45db177677a2e76a141b779e81b283b37f37061034d9805c"
 }

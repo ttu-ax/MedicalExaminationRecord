@@ -45,14 +45,14 @@ fun DuplicateReportReview(newReport: Report, existingReports: List<Report>, onDe
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("请核对是否为同一张报告", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${newReport.category} · ${newReport.sampleDate.ifBlank { newReport.reportDate }}，已有 ${existingReports.size} 份同日同类报告。点击图片可放大查看。",
+                    "${newReport.category} · ${newReport.sampleDate.ifBlank { newReport.reportDate }}，发现 ${existingReports.size} 份同日同类报告（含本次导入中的图片）。点击图片可放大查看。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ReportImagePreview("新上传的图片", newReport.imagePath) { expandedImage = newReport.imagePath }
                     existingReports.forEachIndexed { index, report ->
                         ReportImagePreview(
-                            "已保存的报告 ${index + 1} · ${report.institution.ifBlank { "机构未识别" }}",
+                            "${if (report.id == 0L) "本次导入中待确认的报告" else "已保存的报告"} ${index + 1} · ${report.institution.ifBlank { "机构未识别" }}",
                             report.imagePath
                         ) { expandedImage = report.imagePath }
                     }
