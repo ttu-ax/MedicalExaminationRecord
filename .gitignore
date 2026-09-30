@@ -1,5 +1,6 @@
 .env
 keystore.properties
+android-keystore/
 *.jks
 *.keystore
 server-site/dist/downloads/*.apk
