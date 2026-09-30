@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import org.json.JSONObject
@@ -87,7 +88,12 @@ internal object AppUpdateService {
         }
     }
 
-    fun download(context: Context, update: AppUpdate): File {
+    fun download(
+        context: Context,
+        update: AppUpdate,
+        onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit = { _, _ -> },
+        onVerifying: () -> Unit = {}
+    ): File {
         val directory = File(context.cacheDir, "app-updates").apply { mkdirs() }
         val temporary = File(directory, "medical-record.apk.tmp")
         val apk = File(directory, "medical-record.apk")
@@ -100,8 +106,11 @@ internal object AppUpdateService {
             if (connection.responseCode !in 200..299) error("下载失败（HTTP ${connection.responseCode}）")
             val size = connection.contentLengthLong
             if (size > MAX_APK_BYTES) error("安装包超过 150 MB，已停止下载")
+            val knownSize = size.takeIf { it > 0 }
             val digest = MessageDigest.getInstance("SHA-256")
             var total = 0L
+            var lastUpdate = SystemClock.elapsedRealtime()
+            onProgress(0, knownSize)
             connection.inputStream.use { input ->
                 temporary.outputStream().use { output ->
                     val buffer = ByteArray(32 * 1024)
@@ -112,9 +121,16 @@ internal object AppUpdateService {
                         if (total > MAX_APK_BYTES) error("安装包超过 150 MB，已停止下载")
                         digest.update(buffer, 0, count)
                         output.write(buffer, 0, count)
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastUpdate >= 150) {
+                            onProgress(total, knownSize)
+                            lastUpdate = now
+                        }
                     }
                 }
             }
+            onProgress(total, knownSize)
+            onVerifying()
             val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
             if (!actualHash.equals(update.sha256, ignoreCase = true)) error("安装包校验失败，请稍后重试")
             if (!temporary.renameTo(apk)) {

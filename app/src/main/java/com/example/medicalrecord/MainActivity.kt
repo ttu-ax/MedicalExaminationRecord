@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -33,11 +34,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 private const val MAX_IMPORT_CONCURRENCY = 10
+
+private data class UpdateDownloadProgress(val downloadedBytes: Long, val totalBytes: Long?, val verifying: Boolean = false)
+
+private fun formatDownloadSize(bytes: Long): String = String.format(Locale.CHINA, "%.1f MB", bytes / 1048576.0)
 
 private data class DuplicateReview(
     val index: Int,
@@ -59,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private var importWorkers: ExecutorService = Executors.newFixedThreadPool(5)
     private var availableUpdate by mutableStateOf<AppUpdate?>(null)
     private var updateDownloading by mutableStateOf(false)
+    private var updateProgress by mutableStateOf<UpdateDownloadProgress?>(null)
     private var updateMessage by mutableStateOf("")
     private var updateChecking by mutableStateOf(false)
     private var updateCheckStatus by mutableStateOf("打开应用时会自动检查更新")
@@ -479,10 +486,34 @@ class MainActivity : ComponentActivity() {
                 },
                 title = { Text("发现新版本 ${update.versionName}") },
                 text = {
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(update.releaseNotes.joinToString(separator = "\n") { "•  $it" })
-                        if (updateDownloading) Text("\n正在下载并校验安装包…")
-                        if (updateMessage.isNotBlank()) Text("\n$updateMessage")
+                        Text("请直接覆盖安装；卸载旧版会删除本机保存的报告和 API Key。", style = MaterialTheme.typography.bodySmall)
+                        if (updateDownloading) {
+                            val progress = updateProgress
+                            when {
+                                progress == null -> {
+                                    Text("正在连接下载服务…")
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
+                                progress.verifying -> {
+                                    Text("下载完成，正在校验安装包…")
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
+                                else -> {
+                                    val total = progress.totalBytes
+                                    if (total != null) {
+                                        val fraction = (progress.downloadedBytes.toFloat() / total).coerceIn(0f, 1f)
+                                        Text("正在下载：${formatDownloadSize(progress.downloadedBytes)} / ${formatDownloadSize(total)}（${(fraction * 100).toInt()}%）")
+                                        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                                    } else {
+                                        Text("正在下载：已接收 ${formatDownloadSize(progress.downloadedBytes)}")
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                    }
+                                }
+                            }
+                        }
+                        if (updateMessage.isNotBlank()) Text(updateMessage)
                     }
                 },
                 confirmButton = {
@@ -499,11 +530,21 @@ class MainActivity : ComponentActivity() {
                             }
                         } else {
                             updateDownloading = true
+                            updateProgress = null
                             updateMessage = ""
                             Thread {
-                                val result = runCatching { AppUpdateService.download(this@MainActivity, update) }
+                                val result = runCatching {
+                                    AppUpdateService.download(this@MainActivity, update,
+                                        onProgress = { downloaded, total ->
+                                            runOnUiThread { updateProgress = UpdateDownloadProgress(downloaded, total) }
+                                        },
+                                        onVerifying = {
+                                            runOnUiThread { updateProgress = updateProgress?.copy(verifying = true) }
+                                        })
+                                }
                                 runOnUiThread {
                                     updateDownloading = false
+                                    updateProgress = null
                                     result.onSuccess { apk ->
                                         pendingInstallerFile = apk
                                         if (AppUpdateService.canInstallPackages(this@MainActivity)) {
@@ -538,5 +579,6 @@ class MainActivity : ComponentActivity() {
             .putLong("dismissed_version", versionCode).apply()
         availableUpdate = null
         updateMessage = ""
+        updateProgress = null
     }
 }
