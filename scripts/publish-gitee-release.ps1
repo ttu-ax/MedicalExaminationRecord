@@ -72,14 +72,15 @@ if (-not $remoteMain.Count -or ($remoteMain[0] -split '\s+')[0] -ne $head) {
     throw 'Push the release commit to Gitee main before publishing.'
 }
 
-$envPath = Join-Path $PSScriptRoot '.env'
+$envPaths = @((Join-Path $repoRoot '.env'), (Join-Path $PSScriptRoot '.env'))
 $secureToken = $null
 $token = $null
 $saveToken = $false
 if (-not [string]::IsNullOrWhiteSpace($env:GITEE_TOKEN)) {
     $token = $env:GITEE_TOKEN.Trim()
 } else {
-    if (Test-Path -LiteralPath $envPath -PathType Leaf) {
+    foreach ($envPath in $envPaths) {
+        if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { continue }
         foreach ($line in [System.IO.File]::ReadAllLines($envPath, [System.Text.Encoding]::UTF8)) {
             if ($line -match '^\s*GITEE_TOKEN_DPAPI=(.+)\s*$') {
                 $secureToken = $Matches[1].Trim() | ConvertTo-SecureString
@@ -90,10 +91,12 @@ if (-not [string]::IsNullOrWhiteSpace($env:GITEE_TOKEN)) {
                 break
             }
         }
+        if ($secureToken -or -not [string]::IsNullOrWhiteSpace($token)) { break }
     }
     if (-not $secureToken -and [string]::IsNullOrWhiteSpace($token)) {
         $secureToken = Read-Host 'Gitee personal access token (saved encrypted after success)' -AsSecureString
         $saveToken = $true
+        $envPath = Join-Path $PSScriptRoot '.env'
     }
     if ($secureToken) {
         $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
