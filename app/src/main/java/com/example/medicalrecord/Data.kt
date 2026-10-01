@@ -205,6 +205,74 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, "records.db", null,
     }
 
     fun deleteStage(id: Long) { writableDatabase.delete("stages", "id=?", arrayOf(id.toString())) }
+
+    fun countDuplicateReports(data: TransferData): Int {
+        val rows = observations().groupBy { it.reportId }
+        val known = reports().map { transferSignature(TransferReport(it, rows[it.id].orEmpty())) }.toMutableSet()
+        return data.reports.count { !known.add(transferSignature(it)) }
+    }
+
+    fun importTransfer(data: TransferData, replace: Boolean): TransferResult {
+        val existingRows = if (replace) emptyMap() else observations().groupBy { it.reportId }
+        val knownReports = if (replace) mutableSetOf() else reports().map { report ->
+            transferSignature(TransferReport(report, existingRows[report.id].orEmpty()))
+        }.toMutableSet()
+        val knownStages = if (replace) mutableSetOf() else stages().map(::stageSignature).toMutableSet()
+        val database = writableDatabase
+        var added = 0
+        var skipped = 0
+        var addedStages = 0
+        database.beginTransaction()
+        try {
+            if (replace) {
+                database.delete("observations", null, null)
+                database.delete("reports", null, null)
+                database.delete("report_categories", null, null)
+                database.delete("stages", null, null)
+            }
+            data.categories.forEach { category ->
+                database.insertWithOnConflict("report_categories", null, ContentValues().apply { put("name", category) }, SQLiteDatabase.CONFLICT_IGNORE)
+            }
+            data.reports.forEach { item ->
+                if (!replace && !knownReports.add(transferSignature(item))) {
+                    skipped++
+                } else {
+                    val report = item.report
+                    val id = database.insertOrThrow("reports", null, ContentValues().apply {
+                        put("type", report.type); put("sample_date", report.sampleDate); put("report_date", report.reportDate)
+                        put("institution", report.institution); put("image_path", report.imagePath); put("status", report.status)
+                        put("model", report.model); put("category", report.category)
+                        put("suggested_category", report.suggestedCategory)
+                    })
+                    database.insertWithOnConflict("report_categories", null, ContentValues().apply { put("name", report.category) }, SQLiteDatabase.CONFLICT_IGNORE)
+                    item.observations.forEach { insertObservation(database, id, it) }
+                    added++
+                }
+            }
+            data.stages.forEach { stage ->
+                if (replace || knownStages.add(stageSignature(stage))) {
+                    database.insertOrThrow("stages", null, ContentValues().apply {
+                        put("title", stage.title); put("category", stage.category); put("start_date", stage.startDate)
+                        put("end_date", stage.endDate); put("note", stage.note)
+                    })
+                    addedStages++
+                }
+            }
+            database.setTransactionSuccessful()
+        } finally { database.endTransaction() }
+        return TransferResult(added, skipped, addedStages)
+    }
 }
+
+private fun transferSignature(item: TransferReport): String {
+    val report = item.report
+    return listOf(report.type, report.category, report.sampleDate, report.reportDate, report.institution,
+        item.observations.joinToString("\u001e") { row ->
+            listOf(row.name, row.value, row.unit, row.reference, row.flag).joinToString("\u001f")
+        }).joinToString("\u001d")
+}
+
+private fun stageSignature(stage: Stage): String =
+    listOf(stage.title, stage.category, stage.startDate, stage.endDate, stage.note).joinToString("\u001f")
 
 fun validDate(value: String): Boolean = try { LocalDate.parse(value); true } catch (_: Exception) { false }

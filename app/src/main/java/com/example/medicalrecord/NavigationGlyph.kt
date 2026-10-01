@@ -46,7 +46,7 @@ fun NavigationGlyph(index: Int, selected: Boolean) {
                 drawLine(color, p(8f, 13f), p(16f, 13f), stroke, cap = StrokeCap.Round)
                 drawLine(color, p(8f, 17f), p(13f, 17f), stroke, cap = StrokeCap.Round)
             }
-            else -> {
+            2 -> {
                 drawRoundRect(color, p(3.5f, 5f), Size(17f * unit, 16f * unit), CornerRadius(2f * unit),
                     style = Stroke(stroke))
                 drawLine(color, p(3.5f, 10f), p(20.5f, 10f), stroke)
@@ -55,6 +55,16 @@ fun NavigationGlyph(index: Int, selected: Boolean) {
                 drawCircle(color, 1.2f * unit, p(8f, 14f))
                 drawCircle(color, 1.2f * unit, p(13f, 14f))
                 drawCircle(color, 1.2f * unit, p(8f, 18f))
+            }
+            else -> {
+                drawCircle(color, 7.5f * unit, p(12f, 12f), style = Stroke(stroke))
+                drawCircle(color, 2.5f * unit, p(12f, 12f), style = Stroke(stroke))
+                for (index in 0 until 8) {
+                    val angle = index * Math.PI / 4
+                    val dx = kotlin.math.cos(angle).toFloat()
+                    val dy = kotlin.math.sin(angle).toFloat()
+                    drawLine(color, p(12f + 8f * dx, 12f + 8f * dy), p(12f + 10.5f * dx, 12f + 10.5f * dy), stroke, cap = StrokeCap.Round)
+                }
             }
         }
     }

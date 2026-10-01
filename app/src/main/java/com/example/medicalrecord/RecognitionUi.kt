@@ -191,14 +191,14 @@ fun RecognitionProgressCard(progress: RecognitionProgress, onDismiss: () -> Unit
 fun SettingsScreen(
     hasKey: Boolean, currentVersion: String, checkingUpdate: Boolean, updateStatus: String,
     importConcurrency: Int, onImportConcurrencyChange: (Int) -> Unit, onCheckUpdate: () -> Unit,
-    onBack: () -> Unit, onSave: (String) -> Unit, onClear: () -> Unit
+    onDataManagement: () -> Unit, onSave: (String) -> Unit, onClear: () -> Unit
 ) {
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var confirmingClear by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        TextButton(onClick = onBack) { Text("← 返回首页") }
         Text("设置", style = MaterialTheme.typography.headlineMedium)
+        Button(onClick = onDataManagement, modifier = Modifier.fillMaxWidth()) { Text("数据与备份") }
         Text("应用更新 · 当前版本 $currentVersion", style = MaterialTheme.typography.titleMedium)
         Text(updateStatus, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Button(onClick = onCheckUpdate, enabled = !checkingUpdate) { Text(if (checkingUpdate) "正在检查…" else "检查更新") }

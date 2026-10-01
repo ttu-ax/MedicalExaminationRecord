@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
+import java.time.LocalDate
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
@@ -124,6 +125,12 @@ class MainActivity : ComponentActivity() {
         var stages by remember { mutableStateOf(db.stages()) }
         var categories by remember { mutableStateOf(db.categories()) }
         var tab by remember { mutableStateOf(0) }
+        var dataPage by remember { mutableStateOf(false) }
+        var dataPreview by remember { mutableStateOf<TransferPreview?>(null) }
+        var dataBusy by remember { mutableStateOf(false) }
+        var dataMessage by remember { mutableStateOf("") }
+        var dataWorkingMessage by remember { mutableStateOf("") }
+        var lastBackupAt by remember { mutableStateOf(getSharedPreferences("data-backup", MODE_PRIVATE).getLong("last_export", 0L)) }
         var selectedCategory by remember { mutableStateOf<String?>(null) }
         var categoryView by remember { mutableStateOf("报告") }
         var selectedReport by remember { mutableStateOf<Long?>(null) }
@@ -151,6 +158,7 @@ class MainActivity : ComponentActivity() {
 
         fun goBack() {
             when {
+                dataPage -> dataPage = false
                 selectedReport != null -> {
                     selectedReport = null
                     selectedIndicator = reportOriginIndicator
@@ -167,7 +175,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        BackHandler(selectedReport != null || selectedIndicator != null || selectedCategory != null || tab != 0) { goBack() }
+        BackHandler(dataPage || selectedReport != null || selectedIndicator != null || selectedCategory != null || tab != 0) { goBack() }
 
         fun refresh() {
             reports = db.reports()
@@ -271,17 +279,77 @@ class MainActivity : ComponentActivity() {
             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
 
+        fun performDataWork(stage: String, work: () -> String, onSuccess: () -> Unit = {}) {
+            if (dataBusy) return
+            dataBusy = true
+            dataWorkingMessage = stage
+            dataMessage = ""
+            Thread {
+                val result = runCatching(work)
+                runOnUiThread {
+                    dataBusy = false
+                    result.onSuccess { message -> onSuccess(); dataMessage = message }
+                        .onFailure { error -> dataMessage = error.message ?: "数据处理失败" }
+                }
+            }.start()
+        }
+
+        fun previewData(uri: Uri, kind: TransferKind) {
+            performDataWork("正在检查文件…", {
+                val preview = DataTransfer.preview(this, db, uri, kind)
+                runOnUiThread { dataPreview = preview }
+                "已读取文件，请确认导入方式。"
+            })
+        }
+
+        val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            if (uri != null) performDataWork("正在生成包含原图的备份…", {
+                DataTransfer.exportBackup(this, db, uri)
+                "完整备份已保存。请确认文件位于卸载应用后仍可访问的位置。"
+            }, onSuccess = {
+                lastBackupAt = System.currentTimeMillis()
+                getSharedPreferences("data-backup", MODE_PRIVATE).edit().putLong("last_export", lastBackupAt).apply()
+            })
+        }
+        val restoreBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) previewData(uri, TransferKind.Backup)
+        }
+        val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+            if (uri != null) performDataWork("正在导出指标表格…", {
+                DataTransfer.exportCsv(this, db, uri)
+                "指标表格已导出。"
+            })
+        }
+        val importCsv = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) previewData(uri, TransferKind.Csv)
+        }
+
+        fun applyDataPreview(replace: Boolean) {
+            val preview = dataPreview ?: return
+            performDataWork(if (replace) "正在替换本机数据…" else "正在追加导入…", {
+                val result = DataTransfer.import(this, db, preview.uri, preview.kind, replace)
+                "已导入 ${result.reportsAdded} 份报告、${result.stagesAdded} 个阶段；跳过 ${result.reportsSkipped} 份相同报告。"
+            }, onSuccess = {
+                dataPreview = null
+                reviewQueue = emptyList()
+                importItems = emptyList()
+                importSources = emptyList()
+                importVisible = false
+                refresh()
+            })
+        }
+
         Scaffold(floatingActionButton = {
             if (importItems.isNotEmpty() && !importVisible && duplicateReview == null) {
                 ImportBatchBanner(importItems) { importVisible = true }
             }
         }, bottomBar = {
-            if (selectedReport == null && selectedIndicator == null && tab != 3) {
+            if (selectedReport == null && selectedIndicator == null && !dataPage) {
                 NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
-                    listOf("首页", "报告", "阶段").forEachIndexed { index, label ->
+                    listOf("首页", "报告", "阶段", "设置").forEachIndexed { index, label ->
                         NavigationBarItem(
                             selected = tab == index,
-                            onClick = { tab = index; if (index != 1) selectedCategory = null },
+                            onClick = { tab = index; dataPage = false; if (index != 1) selectedCategory = null },
                             icon = { NavigationGlyph(index, tab == index) },
                             label = { Text(label) },
                             colors = NavigationBarItemDefaults.colors(
@@ -369,7 +437,7 @@ class MainActivity : ComponentActivity() {
                             }?.category
                             categoryView = "趋势"
                         },
-                        onStages = { tab = 2 }, onSettings = { tab = 3 })
+                        onStages = { tab = 2 })
                     1 -> if (selectedCategory == null) ReportsScreen(
                         reports, observations, categories, busy, notice, ::selectPhotos, ::takePhoto,
                         onOpenCategory = { selectedCategory = it; categoryView = "报告" },
@@ -397,12 +465,31 @@ class MainActivity : ComponentActivity() {
                         onAdd = { db.addStage(it); refresh() },
                         onUpdate = { db.updateStage(it); refresh() },
                         onDelete = { db.deleteStage(it); refresh() })
-                    else -> SettingsScreen(hasKey, currentVersion, updateChecking, updateCheckStatus, importConcurrency,
+                    else -> if (dataPage) DataManagementScreen(
+                        reports.size, stages.size, lastBackupAt, dataMessage,
+                        onBack = { dataPage = false },
+                        onExportBackup = {
+                            if (busy) dataMessage = "请等待图片识别完成后再备份。"
+                            else exportBackup.launch("medical-record-backup-${LocalDate.now()}.zip")
+                        },
+                        onRestoreBackup = {
+                            if (busy) dataMessage = "请等待图片识别完成后再恢复。"
+                            else restoreBackup.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                        },
+                        onImportCsv = {
+                            if (busy) dataMessage = "请等待图片识别完成后再导入。"
+                            else importCsv.launch(arrayOf("text/*", "application/vnd.ms-excel", "application/octet-stream"))
+                        },
+                        onExportCsv = {
+                            if (busy) dataMessage = "请等待图片识别完成后再导出。"
+                            else exportCsv.launch("medical-record-indicators-${LocalDate.now()}.csv")
+                        }
+                    ) else SettingsScreen(hasKey, currentVersion, updateChecking, updateCheckStatus, importConcurrency,
                         onImportConcurrencyChange = { count ->
                             importConcurrency = count.coerceIn(1, MAX_IMPORT_CONCURRENCY)
                             getSharedPreferences("image-import", MODE_PRIVATE).edit().putInt("concurrency", importConcurrency).apply()
                         },
-                        onCheckUpdate = { checkForUpdates(manual = true) }, onBack = ::goBack,
+                        onCheckUpdate = { checkForUpdates(manual = true) }, onDataManagement = { dataPage = true },
                         onSave = { key ->
                             keyStore.save(key)
                             hasKey = true
@@ -417,6 +504,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        dataPreview?.let { preview ->
+            TransferPreviewDialog(preview, dataMessage, onCancel = { dataPreview = null },
+                onAppend = { applyDataPreview(false) }, onReplace = { applyDataPreview(true) })
+        }
+        if (dataBusy) TransferWorkingDialog(dataWorkingMessage)
         if (duplicateReview == null) progress?.let { RecognitionProgressCard(it) { progress = null } }
         if (importVisible && duplicateReview == null && importItems.isNotEmpty()) {
             ImportBatchCard(

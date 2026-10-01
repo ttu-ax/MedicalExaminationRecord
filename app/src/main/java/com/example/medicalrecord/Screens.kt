@@ -63,7 +63,7 @@ fun Overview(
     reports: List<Report>, observations: List<Observation>, stages: List<Stage>,
     busy: Boolean, notice: String, hasKey: Boolean, onPick: () -> Unit, onCamera: () -> Unit,
     onReport: (Long) -> Unit, onIndicator: (String) -> Unit,
-    onReports: () -> Unit, onTrends: () -> Unit, onStages: () -> Unit, onSettings: () -> Unit
+    onReports: () -> Unit, onTrends: () -> Unit, onStages: () -> Unit
 ) {
     val confirmed = reports.filter { it.status == "已确认" }
     val pending = reports.filter { it.status != "已确认" }
@@ -75,7 +75,6 @@ fun Overview(
                     Text("体检记录", style = MaterialTheme.typography.headlineMedium)
                     Text("每一次检查，都有迹可循", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = onSettings) { Text("设置  ›") }
             }
         }
         item {
