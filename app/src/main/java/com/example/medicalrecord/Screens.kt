@@ -1,6 +1,15 @@
 package com.example.medicalrecord
 
 import android.graphics.BitmapFactory
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -23,6 +32,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -50,9 +60,11 @@ private fun SectionTitle(title: String, modifier: Modifier = Modifier) {
 @Composable
 private fun InfoCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
-        modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MedicalPalette.Outline)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) { content() }
     }
@@ -78,9 +90,20 @@ fun Overview(
             }
         }
         item {
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = MedicalPalette.DeepTeal)) {
+            val colors = MaterialTheme.medicalColors
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.heroGradientStart),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
                 Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("下一步  ·  健康档案", style = MaterialTheme.typography.labelLarge, color = Color(0xFFA6DDC9))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("下一步  ·  健康档案", style = MaterialTheme.typography.labelLarge, color = Color(0xFFA6DDC9))
+                        if (pending.isNotEmpty()) {
+                            StatusBadge("待校对 ${pending.size}")
+                        }
+                    }
                     Text(
                         when {
                             pending.isNotEmpty() -> "还有 ${pending.size} 份报告待校对"
@@ -114,17 +137,17 @@ fun Overview(
                 OutlinedButton(onClick = onCamera, enabled = !busy, modifier = Modifier.weight(1f)) { Text("拍照导入") }
             }
             if (!hasKey) Text("首次识别需配置 API Key，选图后会引导设置。", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            if (notice.isNotBlank()) Text(notice, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.primary)
+            AnimatedNoticeBanner(notice, Modifier.padding(top = 8.dp))
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                InfoCard(Modifier.weight(1f).clickable(onClick = onReports)) {
-                    Text("${reports.size}", style = MaterialTheme.typography.headlineMedium, color = MedicalPalette.DeepTeal)
-                    Text("报告档案  ↗", color = MedicalPalette.Muted)
+                InfoCard(Modifier.weight(1f).bouncyClickable(onClick = onReports)) {
+                    Text("${reports.size}", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+                    Text("报告档案  ↗", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                InfoCard(Modifier.weight(1f).clickable(onClick = onTrends)) {
-                    Text("${numericKeys.size}", style = MaterialTheme.typography.headlineMedium, color = MedicalPalette.DeepTeal)
-                    Text("追踪指标  ↗", color = MedicalPalette.Muted)
+                InfoCard(Modifier.weight(1f).bouncyClickable(onClick = onTrends)) {
+                    Text("${numericKeys.size}", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+                    Text("追踪指标  ↗", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -132,19 +155,22 @@ fun Overview(
         if (recent.isNotEmpty()) {
             item { SectionTitle("最近指标") }
             items(recent, key = { it.indicatorKey }) { row ->
-                InfoCard(Modifier.clickable { onIndicator(row.indicatorKey) }) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(row.indicatorKey, fontWeight = FontWeight.SemiBold)
-                        Text("${row.value} ${row.unit}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                InfoCard(Modifier.bouncyClickable { onIndicator(row.indicatorKey) }) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(row.indicatorKey, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FlagBadge(row.flag)
+                            Text("${row.value} ${row.unit}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
                     }
-                    Text("查看完整趋势  ›", color = MedicalPalette.Muted, style = MaterialTheme.typography.labelSmall)
+                    Text("查看完整趋势  ›", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
         item {
-            InfoCard(Modifier.clickable(onClick = onStages)) {
-                Text("阶段时间线  ›", fontWeight = FontWeight.SemiBold, color = MedicalPalette.DeepTeal)
-                Text(if (stages.isEmpty()) "记录饮食、运动或用药变化，与指标趋势对照。" else stages.maxByOrNull { it.startDate }!!.let { "${it.title} · ${it.startDate} 起" }, color = MedicalPalette.Muted)
+            InfoCard(Modifier.bouncyClickable(onClick = onStages)) {
+                Text("阶段时间线  ›", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                Text(if (stages.isEmpty()) "记录饮食、运动或用药变化，与指标趋势对照。" else stages.maxByOrNull { it.startDate }!!.let { "${it.title} · ${it.startDate} 起" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
@@ -175,12 +201,12 @@ fun ReportsScreen(
                 TextButton(onClick = { adding = true }) { Text("＋ 新建分类") }
                 TextButton(onClick = onManual) { Text("手工录入") }
             }
-            if (notice.isNotEmpty()) Text(notice, color = MaterialTheme.colorScheme.primary)
+            AnimatedNoticeBanner(notice, Modifier.padding(top = 4.dp))
         }
         if (allCategories.isEmpty()) item {
             InfoCard {
                 Text("还没有报告分类", fontWeight = FontWeight.SemiBold)
-                Text("导入第一份报告后会自动归类，也可以先新建一个分类。", color = MedicalPalette.Muted)
+                Text("导入第一份报告后会自动归类，也可以先新建一个分类。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         items(allCategories, key = { it }) { category ->
@@ -189,18 +215,18 @@ fun ReportsScreen(
             val confirmedIds = reports.filter { it.category == category && it.status == "已确认" && validDate(it.sampleDate) }.map { it.id }.toSet()
             val trendCount = observations.filter { it.reportId in confirmedIds && it.value.trim().replace(",", "").toDoubleOrNull() != null }
                 .map { it.indicatorKey }.distinct().size
-            InfoCard(Modifier.clickable { onOpenCategory(category) }) {
+            InfoCard(Modifier.bouncyClickable { onOpenCategory(category) }) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).background(MedicalPalette.Mint, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                        Text(category.take(1), color = MedicalPalette.DeepTeal, style = MaterialTheme.typography.titleMedium)
+                    Box(Modifier.size(44.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                        Text(category.take(1), color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(category, style = MaterialTheme.typography.titleMedium)
-                        Text("$count 份报告 · $trendCount 项趋势", color = MedicalPalette.Muted, style = MaterialTheme.typography.bodySmall)
+                        Text("$count 份报告 · $trendCount 项趋势", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                     Text("›", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge)
                 }
-                if (pending > 0) Text("$pending 份待校对", color = MedicalPalette.Amber, style = MaterialTheme.typography.labelMedium)
+                if (pending > 0) StatusBadge("待校对 $pending 份")
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
@@ -256,10 +282,12 @@ fun CategoryReportsScreen(
             if (inCategory.size > 3) item { OutlinedTextField(query, { query = it }, label = { Text("搜索报告") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
             if (shown.isEmpty()) item { Text(if (inCategory.isEmpty()) "这个分类还没有报告。可在报告详情中将报告移入此分类。" else "没有匹配的报告。") }
             items(shown, key = { it.id }) { report ->
-                InfoCard(Modifier.clickable { onOpen(report.id) }) {
-                    Text("${report.type} · ${report.sampleDate.ifBlank { "日期待确认" }}", fontWeight = FontWeight.SemiBold)
-                    Text("${report.institution.ifBlank { "机构未识别" }} · ${observations.count { it.reportId == report.id }} 项")
-                    Text(report.status, color = if (report.status == "已确认") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                InfoCard(Modifier.bouncyClickable { onOpen(report.id) }) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${report.type} · ${report.sampleDate.ifBlank { "日期待确认" }}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                        StatusBadge(report.status)
+                    }
+                    Text("${report.institution.ifBlank { "机构未识别" }} · ${observations.count { it.reportId == report.id }} 项", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else {
@@ -274,9 +302,9 @@ fun CategoryReportsScreen(
                         reportById[it.reportId]?.let { report -> report.status == "已确认" && validDate(report.sampleDate) } == true
                 }
                 val sources = allRows.mapNotNull { reportById[it.reportId]?.category }.distinct()
-                InfoCard(Modifier.clickable { onOpenTrend(key) }) {
-                    Text(key, fontWeight = FontWeight.SemiBold)
-                    Text("${allRows.size} 次记录 · 来源：${sources.joinToString("、")}")
+                InfoCard(Modifier.bouncyClickable { onOpenTrend(key) }) {
+                    Text(key, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                    Text("${allRows.size} 次记录 · 来源：${sources.joinToString("、")}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -320,6 +348,15 @@ fun ReportDetail(
     var deleting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var editingInfo by remember(report.id) { mutableStateOf(!validDate(report.sampleDate)) }
+    val animatedImageWeight by animateFloatAsState(
+        targetValue = if (imageExpanded) 0.64f else 0.44f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "imageWeight"
+    )
+
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = onBack) { Text("← 返回报告") }
@@ -327,77 +364,105 @@ fun ReportDetail(
         }
         if (report.imagePath.isNotBlank()) ZoomableReportImage(
             report.imagePath,
-            Modifier.weight(if (imageExpanded) 0.64f else 0.44f),
+            Modifier.weight(animatedImageWeight),
             imageExpanded,
             onToggleExpanded = { imageExpanded = !imageExpanded }
         )
-    LazyColumn(Modifier.weight(if (report.imagePath.isNotBlank()) { if (imageExpanded) 0.36f else 0.56f } else 1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            InfoCard {
-                Text(type, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("采样日期：${sampleDate.ifBlank { "待确认" }}")
-                Text(institution.ifBlank { "机构未识别" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { choosingCategory = true }) { Text("分类：$category · 修改") }
-                if (category == "其他" && report.suggestedCategory.isNotBlank()) {
-                    Text("建议分类：${report.suggestedCategory}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = {
-                        category = report.suggestedCategory
-                        onSaveReport(report.copy(category = category))
-                    }) { Text("创建并移入此分类") }
-                }
-                TextButton(onClick = { editingInfo = !editingInfo }) { Text(if (editingInfo) "收起信息" else "修改报告信息") }
-            }
-            if (editingInfo) {
-                OutlinedTextField(type, { type = it }, label = { Text("报告类型") }, modifier = Modifier.fillMaxWidth())
-                DatePickerField("采样日期", sampleDate, { sampleDate = it })
-                DatePickerField("报告日期", reportDate, { reportDate = it }, optional = true)
-                OutlinedTextField(institution, { institution = it }, label = { Text("检验机构") }, modifier = Modifier.fillMaxWidth())
-                Button(onClick = {
-                    if (!validDate(sampleDate)) error = "请填写有效的采样日期" else {
-                        onSaveReport(report.copy(type = type, category = category, sampleDate = sampleDate, reportDate = reportDate, institution = institution, status = "待校对"))
-                        editingInfo = false
-                        error = "信息已保存"
+        LazyColumn(
+            Modifier
+                .weight(if (report.imagePath.isNotBlank()) (1f - animatedImageWeight).coerceAtLeast(0.1f) else 1f)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                InfoCard {
+                    Text(type, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("采样日期：${sampleDate.ifBlank { "待确认" }}")
+                    Text(institution.ifBlank { "机构未识别" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { choosingCategory = true }) { Text("分类：$category · 修改") }
+                        TextButton(onClick = { editingInfo = !editingInfo }) { Text(if (editingInfo) "收起信息" else "修改报告信息") }
                     }
-                }) { Text("保存报告信息") }
-            }
-            if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (report.imagePath.isNotEmpty()) TextButton(onClick = onRetry) { Text("重新识别") }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                SectionTitle("检验项目 (${rows.size})")
-                TextButton(onClick = { editing = Observation(0, report.id, "", "", "", "", "", "") }) { Text("＋ 添加") }
-            }
-            Text("原图保持在上方；点击项目后可直接在下方修改。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (editing?.id == 0L) item {
-            ObservationEditorInline(editing!!, onClose = { editing = null }, onSave = { onAddObservation(it); editing = null }, onDelete = {})
-        }
-        items(rows, key = { it.id }) { row ->
-            if (editing?.id == row.id) ObservationEditorInline(
-                row, onClose = { editing = null },
-                onSave = { onSaveObservation(it); editing = null },
-                onDelete = { onDeleteObservation(row.id); editing = null }
-            ) else InfoCard(Modifier.clickable { editing = row }) {
-                    Text(row.name, fontWeight = FontWeight.SemiBold)
-                    Text("${row.value.ifBlank { "未识别" }} ${row.unit}  ${row.flag}")
-                    Text("参考：${row.reference.ifBlank { "报告未识别" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (category == "其他" && report.suggestedCategory.isNotBlank()) {
+                        Text("建议分类：${report.suggestedCategory}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = {
+                            category = report.suggestedCategory
+                            onSaveReport(report.copy(category = category))
+                        }) { Text("创建并移入此分类") }
+                    }
                 }
-        }
-        item { TextButton(onClick = { deleting = true }) { Text("删除报告") } }
-    }
-    Button(onClick = {
-        when {
-            !validDate(sampleDate) -> { error = "确认前请填写有效采样日期"; editingInfo = true }
-            rows.isEmpty() -> error = "请先添加或识别检验项目"
-            else -> {
-                onSaveReport(report.copy(type = type, category = category, sampleDate = sampleDate, reportDate = reportDate, institution = institution, status = "已确认"))
-                error = "已确认，数值指标现可进入趋势。"
+                AnimatedVisibility(
+                    visible = editingInfo,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(type, { type = it }, label = { Text("报告类型") }, modifier = Modifier.fillMaxWidth())
+                        DatePickerField("采样日期", sampleDate, { sampleDate = it })
+                        DatePickerField("报告日期", reportDate, { reportDate = it }, optional = true)
+                        OutlinedTextField(institution, { institution = it }, label = { Text("检验机构") }, modifier = Modifier.fillMaxWidth())
+                        Button(onClick = {
+                            if (!validDate(sampleDate)) error = "请填写有效的采样日期" else {
+                                onSaveReport(report.copy(type = type, category = category, sampleDate = sampleDate, reportDate = reportDate, institution = institution, status = "待校对"))
+                                editingInfo = false
+                                error = "信息已保存"
+                            }
+                        }) { Text("保存报告信息") }
+                    }
+                }
+                if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (report.imagePath.isNotEmpty()) TextButton(onClick = onRetry) { Text("重新识别") }
+                }
             }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    SectionTitle("检验项目 (${rows.size})")
+                    TextButton(onClick = { editing = Observation(0, report.id, "", "", "", "", "", "") }) { Text("＋ 添加") }
+                }
+                Text("原图保持在上方；点击项目后可直接在下方修改。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (editing?.id == 0L) item {
+                ObservationEditorInline(editing!!, onClose = { editing = null }, onSave = { onAddObservation(it); editing = null }, onDelete = {})
+            }
+            items(rows, key = { it.id }) { row ->
+                if (editing?.id == row.id) ObservationEditorInline(
+                    row, onClose = { editing = null },
+                    onSave = { onSaveObservation(it); editing = null },
+                    onDelete = { onDeleteObservation(row.id); editing = null }
+                ) else InfoCard(Modifier.bouncyClickable { editing = row }) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(row.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FlagBadge(row.flag)
+                            Text(
+                                "${row.value.ifBlank { "未识别" }} ${row.unit}",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    Text("参考：${row.reference.ifBlank { "报告未识别" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            item { TextButton(onClick = { deleting = true }) { Text("删除报告") } }
         }
-    }, modifier = Modifier.fillMaxWidth().padding(16.dp)) { Text(if (report.status == "已确认") "保存并更新趋势" else "确认报告，加入趋势") }
+        Button(
+            onClick = {
+                when {
+                    !validDate(sampleDate) -> { error = "确认前请填写有效采样日期"; editingInfo = true }
+                    rows.isEmpty() -> error = "请先添加或识别检验项目"
+                    else -> {
+                        onSaveReport(report.copy(type = type, category = category, sampleDate = sampleDate, reportDate = reportDate, institution = institution, status = "已确认"))
+                        error = "已确认，数值指标现可进入趋势。"
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
+        ) {
+            Text(if (report.status == "已确认") "保存并更新趋势" else "确认报告，加入趋势")
+        }
     }
     if (choosingCategory) AlertDialog(
         onDismissRequest = { choosingCategory = false },
@@ -439,14 +504,26 @@ private fun ObservationEditorInline(row: Observation, onClose: () -> Unit, onSav
     var reference by remember(row.id) { mutableStateOf(row.reference) }
     var flag by remember(row.id) { mutableStateOf(row.flag) }
     var confirmingDelete by remember(row.id) { mutableStateOf(false) }
-    InfoCard {
-        Text(if (row.id == 0L) "新增项目" else "校对项目", fontWeight = FontWeight.SemiBold)
+    InfoCard(Modifier.animateContentSize()) {
+        Text(if (row.id == 0L) "新增项目" else "校对项目", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(name, { name = it }, label = { Text("项目名称") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value, { value = it }, label = { Text("结果原文") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(unit, { unit = it }, label = { Text("单位") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(reference, { reference = it }, label = { Text("参考范围原文") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(flag, { flag = it }, label = { Text("报告提示 ↑/↓") }, modifier = Modifier.fillMaxWidth())
-        Row {
+
+        Text("快速标记偏离度：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("正常" to "", "偏高" to "↑", "偏低" to "↓", "阳性" to "+").forEach { (label, flagVal) ->
+                val isSelected = (flagVal.isEmpty() && flag.isEmpty()) || (flagVal.isNotEmpty() && flag.contains(flagVal))
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { flag = if (isSelected && flagVal.isNotEmpty()) "" else flagVal },
+                    label = { Text(if (flagVal.isEmpty()) label else "$flagVal $label") }
+                )
+            }
+        }
+        OutlinedTextField(flag, { flag = it }, label = { Text("报告提示（自定义）") }, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
                 if (name.isNotBlank()) onSave(row.copy(name = name, value = value, unit = unit, reference = reference, flag = flag, indicatorKey = indicatorKey(name)))
             }) { Text("保存项目") }

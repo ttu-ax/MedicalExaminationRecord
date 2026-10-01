@@ -8,6 +8,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,15 +35,19 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
@@ -152,7 +160,7 @@ fun TrendDetail(
     val sourcePalette = sourceCategories.mapIndexed { index, category -> category to sourceColors[index % sourceColors.size] }.toMap()
     val shownStages = if (chartPoints.isEmpty()) emptyList() else visibleStages(stages, chartPoints.first().day, chartPoints.last().day)
     if (landscape) {
-        Column(Modifier.fillMaxSize().background(MedicalPalette.Canvas).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("$key  ·  横屏趋势", style = MaterialTheme.typography.titleLarge)
                 WindowSelector(window) { window = it }
@@ -164,8 +172,9 @@ fun TrendDetail(
                         Modifier.fillMaxWidth().weight(1f), onPoint = { selected = it }, onOpenReport = onOpenReport)
                     else Text("该时间段没有记录")
                 }
-                Card(Modifier.weight(0.3f).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, MedicalPalette.Outline)) {
+                Card(Modifier.weight(0.3f).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))) {
                     Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("检测记录", style = MaterialTheme.typography.titleMedium)
                         chartPoints.reversed().forEach { point ->
@@ -209,21 +218,39 @@ fun TrendDetail(
                     Modifier.fillMaxWidth(), onPoint = { selected = it }, onOpenReport = onOpenReport)
             }
             selected?.let { point -> item {
-                Card(Modifier.fillMaxWidth().clickable { onOpenReport(point.report.id) }) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("${point.report.sampleDate} · ${point.observation.value} ${point.observation.unit}", fontWeight = FontWeight.SemiBold)
-                        Text("当次参考：${point.observation.reference.ifBlank { "报告未提供" }}")
-                        Text("${point.report.category} · ${point.report.type} · 点击查看原报告", color = MedicalPalette.Muted)
+                Card(
+                    Modifier.fillMaxWidth().bouncyClickable { onOpenReport(point.report.id) },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("${point.report.sampleDate} · ${point.observation.value} ${point.observation.unit}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                            FlagBadge(point.observation.flag)
+                        }
+                        Text("当次参考：${point.observation.reference.ifBlank { "报告未提供" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${point.report.category} · ${point.report.type} · 点击查看原报告", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             } }
             item { TextButton(onClick = onStages) { Text("管理阶段标记 →") } }
             item { Text("全部记录", style = MaterialTheme.typography.titleMedium) }
             items(chartPoints.reversed(), key = { it.observation.id }) { point ->
-                Card(Modifier.fillMaxWidth().clickable { selected = point }) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(point.report.sampleDate)
-                        Text("${point.observation.value} ${point.observation.unit} ${point.observation.flag}")
+                Card(
+                    Modifier.fillMaxWidth().bouncyClickable { selected = point },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(point.report.sampleDate, fontWeight = FontWeight.Medium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FlagBadge(point.observation.flag)
+                            Text("${point.observation.value} ${point.observation.unit}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
@@ -255,7 +282,7 @@ private fun TrendPanel(
         limits?.upper != null -> "≤ ${limits.upper}"
         else -> "报告未提供"
     }
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = Color.White), border = BorderStroke(1.dp, MedicalPalette.Outline)) {
+    Card(modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))) {
         Column((if (wide) Modifier.verticalScroll(rememberScrollState()) else Modifier).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (wide) {
                 Text("${displayUnit(axis.unit)}  ·  参考范围 $range", color = axis.color, fontWeight = FontWeight.SemiBold)
@@ -267,7 +294,7 @@ private fun TrendPanel(
                     sourcePalette.forEach { (category, color) -> Text("● $category", color = color, style = MaterialTheme.typography.labelMedium) }
                 }
             }
-            if (!wide && points.size > 3) Text("左右滑动图表查看全部日期 →", color = MedicalPalette.Muted, style = MaterialTheme.typography.bodySmall)
+            if (!wide) Text("可单指左右滑动或双指捏合缩放尺度 · 点击点位可查看报告", color = MedicalPalette.Muted, style = MaterialTheme.typography.bodySmall)
             DirectTrendChart(points, stages, limits, axis, sourcePalette, if (wide) 145.dp else 235.dp,
                 onPoint = onPoint, onOpenReport = onOpenReport)
             if (!wide && stages.isNotEmpty()) {
@@ -283,6 +310,28 @@ private fun TrendPanel(
 }
 
 @Composable
+private fun ZoomChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.bouncyClickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+        )
+    }
+}
+
+@Composable
 private fun DirectTrendChart(
     points: List<TrendPoint>, stages: List<Stage>, reference: ReferenceLimits?, axis: UnitAxis,
     sourcePalette: Map<String, Color>, baseHeight: Dp,
@@ -293,13 +342,17 @@ private fun DirectTrendChart(
     val maxDay = points.maxOf { it.day }
     val density = LocalDensity.current
     val compact = baseHeight < 180.dp
-    val left = with(density) { 68.dp.toPx() }
-    val right = with(density) { 22.dp.toPx() }
-    val top = with(density) { (if (compact) 26.dp else 38.dp).toPx() }
+
+    val yAxisWidth = 56.dp
+    val yAxisWidthPx = with(density) { yAxisWidth.toPx() }
+    val leftPad = with(density) { 16.dp.toPx() }
+    val rightPad = with(density) { 38.dp.toPx() }
+    val top = with(density) { (if (compact) 26.dp else 36.dp).toPx() }
     val plotBottom = with(density) { (baseHeight - 12.dp).toPx() }
     val laneHeight = with(density) { (if (compact) 24.dp else 32.dp).toPx() }
     val stageOffset = with(density) { (if (compact) 18.dp else 23.dp).toPx() }
     val laneDp = if (compact) 24 else 32
+
     val stageLaneEnds = mutableListOf<Long>()
     val stageLanes = stages.mapNotNull { stage ->
         val start = runCatching { LocalDate.parse(stage.startDate).toEpochDay() }.getOrNull() ?: return@mapNotNull null
@@ -311,122 +364,542 @@ private fun DirectTrendChart(
         stage.id to lane
     }
     val chartHeight = baseHeight + (stageLaneEnds.size * laneDp + if (compact) 35 else 55).dp
-    var width by remember { mutableFloatStateOf(1f) }
+
+    var zoomScale by remember { mutableFloatStateOf(1.0f) }
+    var isFitMode by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+    var initialScrolled by remember { mutableStateOf(false) }
+
     var popup by remember(points, stages) { mutableStateOf<Pair<Any, IntOffset>?>(null) }
-    fun x(day: Long): Float = if (minDay == maxDay) (left + width - right) / 2f
-        else left + (day - minDay).toFloat() / (maxDay - minDay).toFloat() * (width - left - right)
+    var activePointId by remember { mutableStateOf<Long?>(null) }
+
     fun y(value: Double): Float = top + ((axis.max - value) / (axis.max - axis.min)).toFloat() * (plotBottom - top)
-    fun stageBounds(stage: Stage): Pair<Float, Float>? {
-        val start = runCatching { LocalDate.parse(stage.startDate).toEpochDay() }.getOrNull() ?: return null
-        val end = runCatching { LocalDate.parse(stage.endDate).toEpochDay() }.getOrNull() ?: maxDay
-        if (start > maxDay || end < minDay) return null
-        return x(start.coerceIn(minDay, maxDay)) to x(end.coerceIn(minDay, maxDay))
-    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+    val dividerColor = MaterialTheme.colorScheme.outlineVariant
+    val defaultCategoryColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val axisTextColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
+    val pointSurfaceColor = MaterialTheme.colorScheme.surface
+    val refZoneColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val chartWidth = maxOf(maxWidth, (points.size * 76 + 80).dp)
-        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            Box(Modifier.width(chartWidth)) {
-                Canvas(Modifier.width(chartWidth).height(chartHeight).onSizeChanged { width = it.width.toFloat() }
-                    .pointerInput(points, stages, axis, width) {
-                        detectTapGestures { tap ->
-                            val hit = 24.dp.toPx()
-                            val point = points.minByOrNull { abs(x(it.day) - tap.x) + abs(y(it.number) - tap.y) }
-                            if (tap.y < plotBottom && point != null && abs(x(point.day) - tap.x) < hit && abs(y(point.number) - tap.y) < hit) {
-                                onPoint(point)
-                                popup = point to IntOffset(tap.x.toInt(), tap.y.toInt())
-                            } else if (tap.y >= plotBottom) {
-                                stages.mapNotNull { stage -> stageBounds(stage)?.let { stage to it } }
-                                    .firstOrNull { (stage, bounds) ->
-                                        val lineY = plotBottom + stageOffset + (stageLanes[stage.id] ?: 0) * laneHeight
-                                        abs(tap.y - lineY) < hit && tap.x in (bounds.first - hit)..(bounds.second + hit)
-                                    }?.first?.let { popup = it to IntOffset(tap.x.toInt(), tap.y.toInt()) }
-                            }
+        val totalAvailableWidth = maxWidth
+        val minChartContentWidth = maxOf(0.dp, totalAvailableWidth - yAxisWidth)
+        val minChartContentWidthPx = with(density) { minChartContentWidth.toPx() }
+
+        val sortedPoints = remember(points) { points.sortedBy { it.day } }
+
+        val (pointXMap, neededWidthPx) = remember(sortedPoints, isFitMode, zoomScale, minChartContentWidthPx) {
+            density.run {
+                val map = mutableMapOf<Long, Float>()
+                if (sortedPoints.isEmpty()) {
+                    map to minChartContentWidthPx
+                } else if (isFitMode) {
+                    val availablePlotWidthPx = maxOf(1f, minChartContentWidthPx - leftPad - rightPad)
+                    if (minDay == maxDay) {
+                        val midX = leftPad + availablePlotWidthPx / 2f
+                        sortedPoints.forEachIndexed { idx, pt ->
+                            map[pt.observation.id] = midX + (idx - sortedPoints.size / 2f) * 8.dp.toPx()
                         }
-                    }) {
-                    val canvas = drawContext.canvas.nativeCanvas
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = with(density) { 11.dp.toPx() }
-                        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                    } else {
+                        val maxAllowedGap = if (sortedPoints.size > 1) {
+                            availablePlotWidthPx / (sortedPoints.size - 1)
+                        } else 40.dp.toPx()
+                        val fitMinGap = minOf(40.dp.toPx(), maxOf(4.dp.toPx(), maxAllowedGap))
+                        var lastX = -Float.MAX_VALUE
+                        for (pt in sortedPoints) {
+                            val rawX = leftPad + (pt.day - minDay).toFloat() / (maxDay - minDay).toFloat() * availablePlotWidthPx
+                            val posX = maxOf(rawX, lastX + fitMinGap).coerceAtMost(minChartContentWidthPx - rightPad)
+                            map[pt.observation.id] = posX
+                            lastX = posX
+                        }
                     }
-                    if (reference?.lower != null && reference.upper != null) {
-                        val high = y(reference.upper)
-                        val low = y(reference.lower)
-                        drawRect(MedicalPalette.Mint.copy(alpha = 0.42f), Offset(left, high),
-                            androidx.compose.ui.geometry.Size(size.width - left - right, low - high))
+                    map to minChartContentWidthPx
+                } else {
+                    val effectiveMinGap = (52f * zoomScale).dp.toPx()
+                    val baseTimeWidthPx = ((sortedPoints.size * 80f + 100f) * zoomScale).dp.toPx()
+                    val availablePlotWidthPx = maxOf(1f, baseTimeWidthPx - leftPad - rightPad)
+                    var currentX = leftPad
+                    for (pt in sortedPoints) {
+                        val rawX = if (minDay == maxDay) {
+                            currentX
+                        } else {
+                            leftPad + (pt.day - minDay).toFloat() / (maxDay - minDay).toFloat() * availablePlotWidthPx
+                        }
+                        val posX = maxOf(rawX, currentX)
+                        map[pt.observation.id] = posX
+                        currentX = posX + effectiveMinGap
                     }
-                    for (index in 0..4) {
-                        val gridY = top + index * (plotBottom - top) / 4f
-                        drawLine(MedicalPalette.Outline, Offset(left, gridY), Offset(size.width - right, gridY), 1.dp.toPx())
-                        paint.color = MedicalPalette.Muted.toArgb()
-                        paint.textAlign = Paint.Align.LEFT
-                        val tick = axis.max - (axis.max - axis.min) * index / 4.0
-                        val nearReference = listOfNotNull(reference?.lower, reference?.upper)
-                            .any { abs(y(it) - gridY) < 18.dp.toPx() }
-                        if (!nearReference) canvas.drawText("%.2f".format(tick), 2.dp.toPx(), gridY + paint.textSize / 3f, paint)
+                    val requiredWidth = maxOf(minChartContentWidthPx, currentX + rightPad + 24.dp.toPx())
+                    map to requiredWidth
+                }
+            }
+        }
+
+        val chartContentWidth = with(density) { neededWidthPx.toDp() }
+        val chartContentWidthPx = neededWidthPx
+
+        LaunchedEffect(chartContentWidth, scrollState.maxValue) {
+            if (!initialScrolled && !isFitMode && scrollState.maxValue > 0) {
+                scrollState.scrollTo(scrollState.maxValue)
+                initialScrolled = true
+            }
+        }
+
+        fun getX(point: TrendPoint): Float = pointXMap[point.observation.id] ?: leftPad
+
+        fun stageBounds(stage: Stage): Pair<Float, Float>? {
+            val start = runCatching { LocalDate.parse(stage.startDate).toEpochDay() }.getOrNull() ?: return null
+            val end = runCatching { LocalDate.parse(stage.endDate).toEpochDay() }.getOrNull() ?: maxDay
+            if (start > maxDay || end < minDay) return null
+
+            fun dayToX(day: Long): Float {
+                if (sortedPoints.isEmpty()) return leftPad
+                if (day <= sortedPoints.first().day) return pointXMap[sortedPoints.first().observation.id] ?: leftPad
+                if (day >= sortedPoints.last().day) return pointXMap[sortedPoints.last().observation.id] ?: (chartContentWidthPx - rightPad)
+                val p1 = sortedPoints.lastOrNull { it.day <= day } ?: sortedPoints.first()
+                val p2 = sortedPoints.firstOrNull { it.day > day } ?: sortedPoints.last()
+                val x1 = pointXMap[p1.observation.id] ?: leftPad
+                val x2 = pointXMap[p2.observation.id] ?: (chartContentWidthPx - rightPad)
+                if (p1.day == p2.day) return x1
+                val fraction = (day - p1.day).toFloat() / (p2.day - p1.day).toFloat()
+                return x1 + fraction * (x2 - x1)
+            }
+
+            val startX = dayToX(start)
+            val endX = dayToX(end)
+            return startX to maxOf(endX, startX + with(density) { 12.dp.toPx() })
+        }
+
+        Column(Modifier.fillMaxWidth()) {
+            // Row 1: Presets & jump to latest
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ZoomChip(
+                    text = "一屏全览",
+                    selected = isFitMode,
+                    onClick = {
+                        isFitMode = true
+                        zoomScale = 1.0f
+                        coroutineScope.launch { scrollState.scrollTo(0) }
                     }
-                    listOfNotNull(reference?.lower, reference?.upper).distinct().forEach { limit ->
-                        val limitY = y(limit)
-                        drawLine(MedicalPalette.Teal.copy(alpha = 0.65f), Offset(left, limitY), Offset(size.width - right, limitY),
-                            1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 5.dp.toPx())))
-                        paint.color = MedicalPalette.Teal.toArgb()
-                        paint.textAlign = Paint.Align.LEFT
-                        canvas.drawText("参 %.2f".format(limit), 2.dp.toPx(), limitY - 3.dp.toPx(), paint)
+                )
+                ZoomChip(
+                    text = "标准",
+                    selected = !isFitMode && abs(zoomScale - 1.0f) < 0.1f,
+                    onClick = {
+                        isFitMode = false
+                        zoomScale = 1.0f
                     }
-                    points.zipWithNext().forEach { (a, b) ->
-                        drawLine(axis.color, Offset(x(a.day), y(a.number)), Offset(x(b.day), y(b.number)),
-                            5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
+                ZoomChip(
+                    text = "展开 2x",
+                    selected = !isFitMode && abs(zoomScale - 2.0f) < 0.1f,
+                    onClick = {
+                        isFitMode = false
+                        zoomScale = 2.0f
                     }
-                    points.forEach { point ->
-                        val center = Offset(x(point.day), y(point.number))
-                        drawCircle(Color.White, 9.dp.toPx(), center)
-                        drawCircle(sourcePalette[point.report.category] ?: axis.color, 7.dp.toPx(), center)
-                        paint.color = axis.color.toArgb()
-                        paint.textAlign = Paint.Align.CENTER
-                        canvas.drawText(point.observation.value, center.x, center.y - 12.dp.toPx(), paint)
-                        paint.color = (sourcePalette[point.report.category] ?: MedicalPalette.Muted).toArgb()
-                        paint.textSize = 10.dp.toPx()
-                        canvas.drawText(point.report.category.take(4), center.x, center.y + 21.dp.toPx(), paint)
-                        paint.textSize = 11.dp.toPx()
+                )
+                ZoomChip(
+                    text = "展开 3x",
+                    selected = !isFitMode && abs(zoomScale - 3.0f) < 0.1f,
+                    onClick = {
+                        isFitMode = false
+                        zoomScale = 3.0f
                     }
-                    drawLine(MedicalPalette.Muted, Offset(left, plotBottom), Offset(size.width - right, plotBottom), 1.2.dp.toPx())
-                    stages.forEach { stage ->
-                        val bounds = stageBounds(stage) ?: return@forEach
-                        val lineY = plotBottom + stageOffset + (stageLanes[stage.id] ?: 0) * laneHeight
-                        val color = trendStageColor(stage.category)
-                        drawLine(color, Offset(bounds.first, lineY), Offset(maxOf(bounds.second, bounds.first + 8.dp.toPx()), lineY),
-                            6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                        paint.color = color.toArgb()
-                        paint.textAlign = Paint.Align.LEFT
-                        canvas.drawText("${stage.category} · ${stage.title}".take(12), bounds.first + 2.dp.toPx(), lineY - 7.dp.toPx(), paint)
+                )
+                if (!isFitMode && scrollState.maxValue > 0) {
+                    Spacer(Modifier.weight(1f))
+                    ZoomChip(
+                        text = "至最新 →",
+                        selected = false,
+                        onClick = {
+                            coroutineScope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
+                        }
+                    )
+                }
+            }
+
+            // Row 2: Percentage scale & Stepper controls
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isFitMode) "模式：一屏全览" else "尺度：${(zoomScale * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isFitMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "· 可双指捏合缩放",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.bouncyClickable {
+                            isFitMode = false
+                            zoomScale = (zoomScale - 0.25f).coerceAtLeast(0.5f)
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ) {
+                        Text(
+                            "－",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
-                    paint.color = MedicalPalette.Muted.toArgb()
-                    paint.textAlign = Paint.Align.CENTER
-                    points.distinctBy { it.day }.forEach { point ->
-                        val date = LocalDate.ofEpochDay(point.day)
-                        canvas.drawText("${date.monthValue}/${date.dayOfMonth}", x(point.day),
-                            plotBottom + (stageLaneEnds.size * laneDp + if (compact) 26 else 43).dp.toPx(), paint)
+                    Surface(
+                        modifier = Modifier.bouncyClickable {
+                            isFitMode = false
+                            zoomScale = (zoomScale + 0.25f).coerceAtMost(4.0f)
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ) {
+                        Text(
+                            "＋",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    if (!isFitMode && abs(zoomScale - 1.0f) > 0.05f) {
+                        TextButton(
+                            onClick = { zoomScale = 1.0f },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("重置", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
-                popup?.let { (content, anchor) ->
-                    Popup(onDismissRequest = { popup = null }, properties = PopupProperties(focusable = true), popupPositionProvider = object : PopupPositionProvider {
-                        override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: androidx.compose.ui.unit.LayoutDirection, popupContentSize: IntSize): IntOffset {
-                            val px = (anchorBounds.left + anchor.x - popupContentSize.width / 2).coerceIn(0, (windowSize.width - popupContentSize.width).coerceAtLeast(0))
-                            val py = (anchorBounds.top + anchor.y - popupContentSize.height - 12).coerceAtLeast(0)
-                            return IntOffset(px, py)
+            }
+
+            Row(Modifier.fillMaxWidth()) {
+                // 1. FIXED Y-AXIS (Left side)
+                Canvas(
+                    Modifier
+                        .width(yAxisWidth)
+                        .height(chartHeight)
+                ) {
+                    val canvas = drawContext.canvas.nativeCanvas
+                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        textSize = with(density) { 10.5.dp.toPx() }
+                        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                    }
+
+                    for (index in 0..4) {
+                        val gridY = top + index * (plotBottom - top) / 4f
+                        val tick = axis.max - (axis.max - axis.min) * index / 4.0
+                        val nearReference = listOfNotNull(reference?.lower, reference?.upper)
+                            .any { abs(y(it) - gridY) < 16.dp.toPx() }
+                        if (!nearReference) {
+                            paint.color = axisTextColor
+                            paint.textAlign = Paint.Align.RIGHT
+                            canvas.drawText("%.2f".format(tick), yAxisWidthPx - 6.dp.toPx(), gridY + paint.textSize / 3f, paint)
                         }
-                    }) {
-                        Card(Modifier.width(250.dp)) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                when (content) {
-                                    is TrendPoint -> {
-                                        Text("${content.report.sampleDate} · ${content.observation.value} ${content.observation.unit}", fontWeight = FontWeight.SemiBold)
-                                        Text("${content.report.category} · 参考 ${content.observation.reference.ifBlank { "未提供" }}")
-                                        TextButton(onClick = { popup = null; onOpenReport(content.report.id) }) { Text("查看原报告") }
+                    }
+
+                    listOfNotNull(reference?.lower, reference?.upper).distinct().forEach { limit ->
+                        val limitY = y(limit)
+                        paint.color = primaryColor.toArgb()
+                        paint.textAlign = Paint.Align.RIGHT
+                        canvas.drawText("参 %.2f".format(limit), yAxisWidthPx - 6.dp.toPx(), limitY + paint.textSize / 3f, paint)
+                    }
+
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(yAxisWidthPx - 1f, top),
+                        end = Offset(yAxisWidthPx - 1f, plotBottom),
+                        strokeWidth = 1.dp.toPx()
+                    )
+                }
+
+                // 2. SCROLLABLE & PINCH-ZOOMABLE CHART AREA (Right side)
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .horizontalScroll(scrollState)
+                ) {
+                    Box(
+                        Modifier
+                            .width(chartContentWidth)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val active = event.changes.filter { it.pressed }
+                                        if (active.size >= 2) {
+                                            val zoom = event.calculateZoom()
+                                            if (zoom != 1f) {
+                                                isFitMode = false
+                                                val newScale = (zoomScale * zoom).coerceIn(0.5f, 4.0f)
+                                                active.forEach { it.consume() }
+                                                zoomScale = newScale
+                                            }
+                                        }
+                                    } while (event.changes.any { it.pressed })
+                                }
+                            }
+                    ) {
+                        Canvas(
+                            Modifier
+                                .width(chartContentWidth)
+                                .height(chartHeight)
+                                .pointerInput(points, stages, axis, pointXMap, chartContentWidth) {
+                                    detectTapGestures { tap ->
+                                        val hit = 28.dp.toPx()
+                                        val point = points.minByOrNull { abs(getX(it) - tap.x) + abs(y(it.number) - tap.y) }
+                                        if (tap.y < plotBottom && point != null && abs(getX(point) - tap.x) < hit && abs(y(point.number) - tap.y) < hit) {
+                                            activePointId = point.observation.id
+                                            onPoint(point)
+                                            popup = point to IntOffset(getX(point).toInt(), y(point.number).toInt())
+                                        } else if (tap.y >= plotBottom) {
+                                            stages.mapNotNull { stage -> stageBounds(stage)?.let { stage to it } }
+                                                .firstOrNull { (stage, bounds) ->
+                                                    val lineY = plotBottom + stageOffset + (stageLanes[stage.id] ?: 0) * laneHeight
+                                                    abs(tap.y - lineY) < hit && tap.x in (bounds.first - hit)..(bounds.second + hit)
+                                                }?.first?.let { stage ->
+                                                    val midStageX = stageBounds(stage)?.let { (it.first + it.second) / 2f }?.toInt() ?: tap.x.toInt()
+                                                    val lineY = plotBottom + stageOffset + (stageLanes[stage.id] ?: 0) * laneHeight
+                                                    popup = stage to IntOffset(midStageX, lineY.toInt())
+                                                }
+                                        }
                                     }
-                                    is Stage -> {
-                                        Text(content.title, color = trendStageColor(content.category), fontWeight = FontWeight.SemiBold)
-                                        Text("${content.startDate} — ${content.endDate.ifBlank { "至今" }}")
-                                        Text(content.note.ifBlank { "未填写具体措施" })
+                                }
+                        ) {
+                        val canvas = drawContext.canvas.nativeCanvas
+                        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            textSize = with(density) { 11.dp.toPx() }
+                            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                        }
+
+                        if (reference?.lower != null && reference.upper != null) {
+                            val high = y(reference.upper)
+                            val low = y(reference.lower)
+                            drawRect(
+                                refZoneColor,
+                                Offset(0f, high),
+                                androidx.compose.ui.geometry.Size(size.width, low - high)
+                            )
+                        }
+
+                        for (index in 0..4) {
+                            val gridY = top + index * (plotBottom - top) / 4f
+                            drawLine(gridColor, Offset(0f, gridY), Offset(size.width, gridY), 1.dp.toPx())
+                        }
+
+                        listOfNotNull(reference?.lower, reference?.upper).distinct().forEach { limit ->
+                            val limitY = y(limit)
+                            drawLine(
+                                primaryColor.copy(alpha = 0.65f),
+                                Offset(0f, limitY),
+                                Offset(size.width, limitY),
+                                1.5.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 5.dp.toPx()))
+                            )
+                        }
+
+                        points.zipWithNext().forEach { (a, b) ->
+                            drawLine(
+                                axis.color,
+                                Offset(getX(a), y(a.number)),
+                                Offset(getX(b), y(b.number)),
+                                4.dp.toPx(),
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round
+                            )
+                        }
+
+                        val activePoint = points.firstOrNull { it.observation.id == activePointId }
+                        if (activePoint != null) {
+                            val ax = getX(activePoint)
+                            val ay = y(activePoint.number)
+                            drawLine(
+                                primaryColor.copy(alpha = 0.45f),
+                                Offset(ax, top),
+                                Offset(ax, plotBottom),
+                                1.5.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                            )
+                            drawCircle(primaryColor.copy(alpha = 0.22f), 15.dp.toPx(), Offset(ax, ay))
+                        }
+
+                        val minNumber = points.minOf { it.number }
+                        val maxNumber = points.maxOf { it.number }
+                        var lastDrawnLabelX = -Float.MAX_VALUE
+                        val minLabelGap = with(density) { 46.dp.toPx() }
+
+                        points.forEachIndexed { idx, point ->
+                            val px = getX(point)
+                            val py = y(point.number)
+                            val center = Offset(px, py)
+                            val isFirstOrLast = idx == 0 || idx == points.size - 1
+                            val isExtreme = point.number == minNumber || point.number == maxNumber
+                            val isSelected = point.observation.id == activePointId
+                            val shouldDrawLabel = isSelected || isFirstOrLast || isExtreme || (px - lastDrawnLabelX >= minLabelGap)
+
+                            drawCircle(pointSurfaceColor, 9.dp.toPx(), center)
+                            drawCircle(sourcePalette[point.report.category] ?: axis.color, 6.5f.dp.toPx(), center)
+
+                            if (shouldDrawLabel) {
+                                lastDrawnLabelX = px
+                                val valueText = point.observation.value
+                                val textWidth = paint.measureText(valueText)
+                                val halfTextWidth = textWidth / 2f
+
+                                val (drawX, align) = when {
+                                    px + halfTextWidth > size.width - 4.dp.toPx() -> (size.width - 6.dp.toPx()) to Paint.Align.RIGHT
+                                    px - halfTextWidth < 4.dp.toPx() -> 4.dp.toPx() to Paint.Align.LEFT
+                                    else -> px to Paint.Align.CENTER
+                                }
+
+                                paint.color = axis.color.toArgb()
+                                paint.textAlign = align
+                                canvas.drawText(valueText, drawX, center.y - 12.dp.toPx(), paint)
+
+                                paint.color = (sourcePalette[point.report.category] ?: defaultCategoryColor).toArgb()
+                                paint.textSize = 10.dp.toPx()
+                                canvas.drawText(point.report.category.take(4), drawX, center.y + 20.dp.toPx(), paint)
+                                paint.textSize = 11.dp.toPx()
+                            }
+                        }
+
+                        drawLine(dividerColor, Offset(0f, plotBottom), Offset(size.width, plotBottom), 1.2.dp.toPx())
+
+                        stages.forEach { stage ->
+                            val bounds = stageBounds(stage) ?: return@forEach
+                            val lineY = plotBottom + stageOffset + (stageLanes[stage.id] ?: 0) * laneHeight
+                            val color = trendStageColor(stage.category)
+                            drawLine(
+                                color,
+                                Offset(bounds.first, lineY),
+                                Offset(maxOf(bounds.second, bounds.first + 8.dp.toPx()), lineY),
+                                6.dp.toPx(),
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round
+                            )
+                            paint.color = color.toArgb()
+                            paint.textAlign = Paint.Align.LEFT
+                            canvas.drawText("${stage.category} · ${stage.title}".take(12), bounds.first + 2.dp.toPx(), lineY - 7.dp.toPx(), paint)
+                        }
+
+                        paint.color = axisTextColor
+                        var lastDateX = -Float.MAX_VALUE
+                        val minDateGap = with(density) { 38.dp.toPx() }
+                        val sortedDays = points.distinctBy { it.day }.sortedBy { it.day }
+
+                        sortedDays.forEachIndexed { dIdx, point ->
+                            val px = getX(point)
+                            val isEdge = dIdx == 0 || dIdx == sortedDays.size - 1
+                            if (isEdge || px - lastDateX >= minDateGap) {
+                                lastDateX = px
+                                val date = LocalDate.ofEpochDay(point.day)
+                                val dateStr = "${date.monthValue}/${date.dayOfMonth}"
+                                val dateWidth = paint.measureText(dateStr)
+                                val halfDateWidth = dateWidth / 2f
+
+                                val (drawDateX, dateAlign) = when {
+                                    px + halfDateWidth > size.width - 4.dp.toPx() -> (size.width - 4.dp.toPx()) to Paint.Align.RIGHT
+                                    px - halfDateWidth < 4.dp.toPx() -> 4.dp.toPx() to Paint.Align.LEFT
+                                    else -> px to Paint.Align.CENTER
+                                }
+
+                                paint.textAlign = dateAlign
+                                canvas.drawText(
+                                    dateStr,
+                                    drawDateX,
+                                    plotBottom + (stageLaneEnds.size * laneDp + if (compact) 26 else 43).dp.toPx(),
+                                    paint
+                                )
+                            }
+                        }
+                    }
+
+                    popup?.let { (content, anchor) ->
+                        Popup(
+                            onDismissRequest = { popup = null; activePointId = null },
+                            properties = PopupProperties(focusable = true),
+                            popupPositionProvider = object : PopupPositionProvider {
+                                override fun calculatePosition(
+                                    anchorBounds: IntRect,
+                                    windowSize: IntSize,
+                                    layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+                                    popupContentSize: IntSize
+                                ): IntOffset {
+                                    val currentTargetX = when (content) {
+                                        is TrendPoint -> getX(content)
+                                        is Stage -> stageBounds(content)?.let { (it.first + it.second) / 2f } ?: anchor.x.toFloat()
+                                        else -> anchor.x.toFloat()
+                                    }
+                                    val currentTargetY = when (content) {
+                                        is TrendPoint -> y(content.number)
+                                        is Stage -> (plotBottom + stageOffset + (stageLanes[content.id] ?: 0) * laneHeight)
+                                        else -> anchor.y.toFloat()
+                                    }
+                                    val px = (anchorBounds.left + currentTargetX.toInt() - popupContentSize.width / 2)
+                                        .coerceIn(12, (windowSize.width - popupContentSize.width - 12).coerceAtLeast(0))
+                                    val py = (anchorBounds.top + currentTargetY.toInt() - popupContentSize.height - 14).coerceAtLeast(16)
+                                    return IntOffset(px, py)
+                                }
+                            }
+                        ) {
+                            Card(
+                                Modifier.width(260.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                            ) {
+                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    when (content) {
+                                        is TrendPoint -> {
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                                Text(content.report.sampleDate, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                                FlagBadge(content.observation.flag)
+                                            }
+                                            Text(
+                                                "${content.observation.value} ${content.observation.unit}",
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text("当次参考：${content.observation.reference.ifBlank { "未提供" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                            Text("来源分类：${content.report.category} · ${content.report.type}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                            Button(
+                                                onClick = { popup = null; activePointId = null; onOpenReport(content.report.id) },
+                                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                                            ) {
+                                                Text("查看原报告")
+                                            }
+                                        }
+                                        is Stage -> {
+                                            Text(content.title, color = trendStageColor(content.category), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                            Text("${content.startDate} — ${content.endDate.ifBlank { "至今" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                            Text(content.note.ifBlank { "未填写具体措施" }, style = MaterialTheme.typography.bodyMedium)
+                                        }
                                     }
                                 }
                             }
@@ -436,4 +909,5 @@ private fun DirectTrendChart(
             }
         }
     }
+}
 }

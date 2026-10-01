@@ -128,7 +128,8 @@ fun StagesScreen(stages: List<Stage>, onAdd: (Stage) -> Unit, onUpdate: (Stage) 
             Card(
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MedicalPalette.Outline)
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(month.format(monthTitle), style = MaterialTheme.typography.titleLarge)
@@ -189,11 +190,11 @@ fun StagesScreen(stages: List<Stage>, onAdd: (Stage) -> Unit, onUpdate: (Stage) 
                         }
                     }
                     if (inMonth.isNotEmpty()) {
-                        Text("本月阶段 · ${inMonth.size}", style = MaterialTheme.typography.labelLarge, color = MedicalPalette.Muted)
+                        Text("本月阶段 · ${inMonth.size}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         inMonth.forEach { stage ->
-                            Row(Modifier.fillMaxWidth().clickable { editing = stage }.padding(vertical = 7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Row(Modifier.fillMaxWidth().bouncyClickable { editing = stage }.padding(vertical = 7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(stage.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                                Text(stage.category, color = MedicalPalette.Muted)
+                                Text(stage.category, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -234,25 +235,70 @@ private fun StageDetailsDialog(stage: Stage, onClose: () -> Unit, onSave: (Stage
     var error by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(if (stage.id == 0L) "新建阶段" else "编辑阶段") },
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (stage.id == 0L) "新建阶段标记" else "编辑阶段标记")
+                if (stage.id == 0L) {
+                    Text(
+                        "起止日期已根据月历选择自动带入，请填写阶段名称完成创建",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
         text = {
-            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("类型")
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("干预类型 *（必选）", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     stageCategories.forEach { option ->
                         FilterChip(selected = category == option, onClick = { category = option }, label = { Text(option) })
                     }
                 }
-                OutlinedTextField(title, { title = it }, label = { Text("阶段名称，例如：开始规律运动") }, modifier = Modifier.fillMaxWidth())
-                DatePickerField("开始日期", start, { start = it })
-                DatePickerField("结束日期", end, { end = it }, optional = true)
-                OutlinedTextField(note, { note = it }, label = { Text("具体做了什么") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = {
+                        title = it
+                        if (it.isNotBlank() && error.contains("名称")) error = ""
+                    },
+                    label = { Text("阶段名称 *（必填）") },
+                    placeholder = { Text("例如：开始规律运动、低碳饮食、调整用药") },
+                    isError = error.isNotBlank() && title.isBlank(),
+                    supportingText = {
+                        if (error.isNotBlank() && title.isBlank()) {
+                            Text("阶段名称为必填项", color = MaterialTheme.colorScheme.error)
+                        } else {
+                            Text("必填 · 将清晰呈现在日历与趋势图阶段线上", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DatePickerField("开始日期 *", start, { start = it; if (error.isNotBlank()) error = "" })
+                    DatePickerField("结束日期", end, { end = it; if (error.isNotBlank()) error = "" }, optional = true)
+                    Text("结束日期为选填项，留空默认代表“持续至今/正在进行”", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("详细记录（选填）") },
+                    placeholder = { Text("具体做了什么？例如：每周跑步3次、每次5公里、晚间戒碳水...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             }
         },
         confirmButton = { TextButton(onClick = {
-            if (title.isBlank() || !validDate(start) || (end.isNotBlank() && (!validDate(end) || end < start))) error = "请检查名称和起止日期"
-            else onSave(stage.copy(title = title.trim(), category = category, startDate = start, endDate = end, note = note.trim()))
+            if (title.isBlank()) {
+                error = "请填写阶段名称（必填项）"
+            } else if (!validDate(start)) {
+                error = "请选择正确的开始日期"
+            } else if (end.isNotBlank() && (!validDate(end) || end < start)) {
+                error = "结束日期不能早于开始日期"
+            } else {
+                onSave(stage.copy(title = title.trim(), category = category, startDate = start, endDate = end, note = note.trim()))
+            }
         }) { Text("保存") } },
         dismissButton = {
             Row {
