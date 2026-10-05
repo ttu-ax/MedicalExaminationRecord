@@ -80,7 +80,7 @@ if (-not $SkipSite) {
     }
 }
 
-Invoke-Git @('add', '-A', '--', 'README.md', 'app/src/main', 'app/build.gradle.kts', 'server-site/README.md', 'server-site/dist/update.json', 'scripts') | Out-Null
+Invoke-Git @('add', '-A', '--', 'README.md', 'app/src/main', 'app/src/test', 'app/build.gradle.kts', 'server-site/README.md', 'server-site/dist/update.json', 'scripts') | Out-Null
 $toCommit = @(Invoke-Git @('diff', '--cached', '--name-only'))
 if ($toCommit.Count) {
     Invoke-Git @('commit', '-m', "Publish $($manifest.version_name)") | ForEach-Object { Write-Host $_ }

@@ -55,9 +55,15 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, "records.db", null,
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, sample_date TEXT NOT NULL, report_date TEXT NOT NULL, institution TEXT NOT NULL, image_path TEXT NOT NULL, status TEXT NOT NULL, model TEXT NOT NULL, category TEXT NOT NULL, suggested_category TEXT NOT NULL DEFAULT '')""")
         db.execSQL("CREATE TABLE report_categories (name TEXT PRIMARY KEY NOT NULL)")
+        db.execSQL("INSERT OR IGNORE INTO report_categories(name) VALUES ('血常规'), ('生化')")
         db.execSQL("""CREATE TABLE observations (id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, unit TEXT NOT NULL, reference TEXT NOT NULL, flag TEXT NOT NULL, indicator_key TEXT NOT NULL, FOREIGN KEY(report_id) REFERENCES reports(id) ON DELETE CASCADE)""")
         db.execSQL("""CREATE TABLE stages (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, category TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, note TEXT NOT NULL)""")
         db.execSQL("CREATE INDEX observations_indicator ON observations(indicator_key)")
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        db.execSQL("INSERT OR IGNORE INTO report_categories(name) VALUES ('血常规'), ('生化')")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -66,6 +72,7 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, "records.db", null,
             db.execSQL("UPDATE reports SET category = type")
             db.execSQL("CREATE TABLE report_categories (name TEXT PRIMARY KEY NOT NULL)")
             db.execSQL("INSERT OR IGNORE INTO report_categories(name) SELECT DISTINCT category FROM reports")
+            db.execSQL("INSERT OR IGNORE INTO report_categories(name) VALUES ('血常规'), ('生化')")
         }
         if (oldVersion < 3) db.execSQL("ALTER TABLE reports ADD COLUMN suggested_category TEXT NOT NULL DEFAULT ''")
     }
@@ -85,6 +92,14 @@ class RecordDb(context: Context) : SQLiteOpenHelper(context, "records.db", null,
             while (c.moveToNext()) add(c.getString(0))
         }
     }
+
+    fun allCategories(): List<String> = buildList {
+        addAll(listOf("血常规", "生化"))
+        addAll(categories())
+        readableDatabase.rawQuery("SELECT DISTINCT category FROM reports", null).use { c ->
+            while (c.moveToNext()) add(c.getString(0))
+        }
+    }.map { it.trim() }.filter { it.isNotBlank() && it != "其他" }.distinct().sorted()
 
     fun addCategory(name: String) {
         val value = name.trim()

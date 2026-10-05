@@ -234,7 +234,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val imagePath = path
                     runOnUiThread { updateImportItem(index) { it.copy(path = imagePath, status = ImportImageStatus.Working, stage = "准备识别") } }
-                    val recognized = recognizeImage(imagePath, apiKey,
+                    val recognized = recognizeImage(imagePath, apiKey, categories = db.allCategories(),
                         onStage = { stage -> runOnUiThread { updateImportItem(index) { it.copy(stage = stage) } } },
                         onStream = { stream -> runOnUiThread { updateImportItem(index) { it.copy(stream = stream) } } })
                     runOnUiThread {
@@ -466,10 +466,10 @@ class MainActivity : ComponentActivity() {
                                 progress = RecognitionProgress(1, 1, 0, "准备图片")
                                 Thread {
                                     try {
-                                        val result = recognizeImage(report.imagePath, apiKey,
+                                        val result = recognizeImage(report.imagePath, apiKey, categories = db.allCategories(),
                                             onStage = { stage -> runOnUiThread { progress = progress?.copy(stage = stage) } },
                                             onStream = { stream -> runOnUiThread { progress = progress?.copy(stream = stream) } })
-                                        db.updateReport(report.copy(type = result.report.type, sampleDate = result.report.sampleDate, reportDate = result.report.reportDate, institution = result.report.institution, status = "待校对", suggestedCategory = result.report.suggestedCategory))
+                                        db.updateReport(report.copy(type = result.report.type, category = result.report.category, sampleDate = result.report.sampleDate, reportDate = result.report.reportDate, institution = result.report.institution, status = "待校对", suggestedCategory = result.report.suggestedCategory))
                                         db.replaceObservations(report.id, result.observations)
                                         runOnUiThread { refresh(); notice = "重新识别完成，请校对新增项目。"; busy = false; progress = progress?.copy(completed = 1, stage = notice, active = false) }
                                     } catch (error: Exception) {

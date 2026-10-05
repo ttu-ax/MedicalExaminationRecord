@@ -1,14 +1,16 @@
 {
-    "app_name":  "体检记录",
-    "package_name":  "com.example.medicalrecord",
-    "version_name":  "0.5.9",
-    "version_code":  14,
-    "minimum_supported_version_code":  1,
-    "force_update":  false,
-    "published_at":  "2026-10-01T04:15:05Z",
-    "release_notes":  [
-                          "1. 优化UI微动效与全局平滑转场；2. 趋势图重构支持左右滑动与双指捏合缩放，固定Y轴与动态点距；3. 阶段日历增加必填项提示"
-                      ],
-    "download_url":  "https://acupofttu.top/downloads/medical-record-v0.5.9.apk",
-    "sha256":  "10249f5d395d41ebd56f5d8ce525c116f01afd0c5582f1a827334f808e12d5e0"
+  "app_name": "体检记录",
+  "package_name": "com.example.medicalrecord",
+  "version_name": "0.5.12",
+  "version_code": 17,
+  "minimum_supported_version_code": 1,
+  "force_update": false,
+  "published_at": "2026-10-05T08:44:38Z",
+  "release_notes": [
+    "更新检查兼容自建站和 Gitee，优先选择更高版本",
+    "增加用户自定义分类自动识别",
+    "优化阶段色彩表现"
+  ],
+  "download_url": "https://acupofttu.top/downloads/medical-record-v0.5.12.apk",
+  "sha256": "adb02c94ffb20b068f9258893d2c75188d2fdcab86651cbc6310e6cd540dacce"
 }

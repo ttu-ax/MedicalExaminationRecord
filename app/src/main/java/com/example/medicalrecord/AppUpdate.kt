@@ -27,10 +27,43 @@ internal data class AppUpdate(
 
 internal object AppUpdateService {
     const val MANIFEST_URL = "https://gitee.com/api/v5/repos/afeng66/MedicalExaminationRecord/releases/latest"
+    private const val SITE_MANIFEST_URL = "https://acupofttu.top/apps/medical-record/update.json"
+    private const val SITE_DOWNLOAD_BASE = "https://acupofttu.top/downloads"
     private const val RELEASE_DOWNLOAD_BASE = "https://gitee.com/afeng66/MedicalExaminationRecord/releases/download"
     private const val MAX_APK_BYTES = 150L * 1024 * 1024
 
     fun check(context: Context): AppUpdate? {
+        val current = installedVersionCode(context)
+        return checkSources(current, listOf(
+            "自建站" to { checkSite(context.packageName, current) },
+            "Gitee" to { checkGitee(context.packageName, current) }
+        ))
+    }
+
+    internal fun checkSources(current: Long, sources: List<Pair<String, () -> AppUpdate>>): AppUpdate? {
+        val results = sources.map { (name, check) -> name to runCatching(check) }
+        val latest = results.mapNotNull { it.second.getOrNull() }.maxByOrNull { it.versionCode }
+        if (latest != null && latest.versionCode > current) return latest
+        val failures = results.filter { it.second.isFailure }
+        if (failures.isNotEmpty()) {
+            error("无法确认最新版本：" + failures.joinToString("；") { (name, result) ->
+                "$name：${result.exceptionOrNull()?.message ?: "无法连接更新服务"}"
+            })
+        }
+        return null
+    }
+
+    private fun checkSite(packageName: String, current: Long): AppUpdate {
+        val json = fetchJson(SITE_MANIFEST_URL)
+        if (json.optString("app_id") != "medical-record") error("更新信息中的应用 ID 不匹配")
+        val version = json.optString("version_name")
+        if (!version.matches(Regex("\\d+\\.\\d+\\.\\d+"))) error("更新信息中的版本名称无效")
+        val expectedDownloadUrl = "$SITE_DOWNLOAD_BASE/medical-record-v$version.apk"
+        if (json.optString("download_url") != expectedDownloadUrl) error("更新信息中的下载地址无效")
+        return parseManifest(json, packageName, current)
+    }
+
+    private fun checkGitee(packageName: String, current: Long): AppUpdate {
         val release = fetchJson(MANIFEST_URL)
         val tag = release.optString("tag_name")
         if (!tag.matches(Regex("v\\d+\\.\\d+\\.\\d+"))) error("Gitee 发行版标签无效")
@@ -39,19 +72,22 @@ internal object AppUpdateService {
         if (!assets.containsDownload("update.json", manifestUrl)) error("Gitee 发行版缺少更新信息附件")
         val json = fetchJson(manifestUrl)
         if (json.optString("version_name") != tag.removePrefix("v")) error("更新信息与发行版标签不匹配")
-        if (json.optString("package_name") != context.packageName) error("更新信息中的应用标识不匹配")
-        val versionCode = json.optLong("version_code", -1)
-        if (versionCode < 1) error("更新信息中的版本号无效")
-        if (versionCode <= installedVersionCode(context)) return null
         val downloadUrl = json.optString("download_url").takeIf(String::isNotBlank) ?: error("更新信息缺少下载地址")
         val apkName = "medical-record-$tag.apk"
         val expectedDownloadUrl = "$RELEASE_DOWNLOAD_BASE/$tag/$apkName"
         if (downloadUrl != expectedDownloadUrl || !assets.containsDownload(apkName, downloadUrl)) {
             error("更新信息中的下载地址无效")
         }
+        return parseManifest(json, packageName, current)
+    }
+
+    private fun parseManifest(json: JSONObject, packageName: String, current: Long): AppUpdate {
+        if (json.optString("package_name") != packageName) error("更新信息中的应用标识不匹配")
+        val versionCode = json.optLong("version_code", -1)
+        if (versionCode < 1) error("更新信息中的版本号无效")
+        val downloadUrl = json.optString("download_url")
         val sha256 = json.optString("sha256").lowercase()
         if (!sha256.matches(Regex("[a-f0-9]{64}"))) error("更新信息中的安装包校验值无效")
-        val current = installedVersionCode(context)
         val minimum = json.optLong("minimum_supported_version_code", 1)
         return AppUpdate(
             versionName = json.optString("version_name"),

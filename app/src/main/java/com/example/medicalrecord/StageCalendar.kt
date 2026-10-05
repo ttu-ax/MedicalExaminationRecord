@@ -1,11 +1,11 @@
 package com.example.medicalrecord
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -17,11 +17,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -29,6 +33,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,13 +55,7 @@ import java.time.format.DateTimeFormatter
 private val monthTitle = DateTimeFormatter.ofPattern("yyyy年M月")
 private val stageCategories = listOf("饮食", "运动", "用药", "作息", "其他")
 
-private fun stageColor(category: String): Color = when (category) {
-    "饮食" -> Color(0x883DAA80)
-    "运动" -> Color(0x8878A9DA)
-    "用药" -> Color(0x88E7B46D)
-    "作息" -> Color(0x88AD9ED6)
-    else -> Color(0x8896AAA7)
-}
+private fun stageColor(stage: Stage): Color = stage.themeColor().primary
 
 private fun Stage.firstDay(): LocalDate? = runCatching { LocalDate.parse(startDate) }.getOrNull()
 private fun Stage.lastDay(): LocalDate? =
@@ -176,13 +175,26 @@ fun StagesScreen(stages: List<Stage>, onAdd: (Stage) -> Unit, onUpdate: (Stage) 
                                         val end = stage.lastDay()!!.coerceAtMost(weekStart.plusDays(6)).coerceAtMost(month.atEndOfMonth())
                                         val left = (start.toEpochDay() - weekStart.toEpochDay()).toInt()
                                         val span = (end.toEpochDay() - start.toEpochDay() + 1).toInt()
+                                        val style = stage.themeColor()
+                                        val isDark = isSystemInDarkTheme()
+                                        val containerBg = if (isDark) style.containerDark else style.containerLight
+                                        val textColor = if (isDark) style.onContainerDark else style.onContainerLight
                                         Box(
                                             Modifier.offset(x = maxWidth / 7 * left).width(maxWidth / 7 * span)
-                                                .height(23.dp).background(stageColor(stage.category), RoundedCornerShape(5.dp))
+                                                .height(23.dp)
+                                                .background(containerBg, RoundedCornerShape(5.dp))
+                                                .border(1.dp, style.primary.copy(alpha = if (isDark) 0.5f else 0.35f), RoundedCornerShape(5.dp))
                                                 .clickable { editing = stage }.padding(horizontal = 5.dp),
                                             contentAlignment = Alignment.CenterStart
                                         ) {
-                                            Text(stage.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                                            Text(
+                                                stage.title,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = textColor,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
                                         }
                                     }
                                 }
@@ -192,9 +204,29 @@ fun StagesScreen(stages: List<Stage>, onAdd: (Stage) -> Unit, onUpdate: (Stage) 
                     if (inMonth.isNotEmpty()) {
                         Text("本月阶段 · ${inMonth.size}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         inMonth.forEach { stage ->
-                            Row(Modifier.fillMaxWidth().bouncyClickable { editing = stage }.padding(vertical = 7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(stage.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                                Text(stage.category, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val style = stage.themeColor()
+                            val isDark = isSystemInDarkTheme()
+                            Row(
+                                Modifier.fillMaxWidth().bouncyClickable { editing = stage }.padding(vertical = 7.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(9.dp).background(style.primary, CircleShape))
+                                    Text(stage.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+                                }
+                                Surface(
+                                    color = if (isDark) style.containerDark else style.containerLight,
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        stage.category,
+                                        color = if (isDark) style.onContainerDark else style.onContainerLight,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -237,7 +269,11 @@ private fun StageDetailsDialog(stage: Stage, onClose: () -> Unit, onSave: (Stage
         onDismissRequest = onClose,
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (stage.id == 0L) "新建阶段标记" else "编辑阶段标记")
+                val previewStyle = StagePalette.colorFor(stage.id, title, category)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.size(10.dp).background(previewStyle.primary, CircleShape))
+                    Text(if (stage.id == 0L) "新建阶段标记" else "编辑阶段标记")
+                }
                 if (stage.id == 0L) {
                     Text(
                         "起止日期已根据月历选择自动带入，请填写阶段名称完成创建",

@@ -98,13 +98,8 @@ private data class TrendPoint(val observation: Observation, val report: Report, 
 
 private data class UnitAxis(val unit: String, val min: Double, val max: Double, val color: Color)
 private val sourceColors = listOf(Color(0xFF1769AA), Color(0xFFB35F2B), Color(0xFF7658A8), Color(0xFF13816F), Color(0xFF9A435E))
-private fun trendStageColor(category: String): Color = when (category) {
-    "饮食" -> Color(0xFF278361)
-    "运动" -> Color(0xFF3979B7)
-    "用药" -> Color(0xFFC07B28)
-    "作息" -> Color(0xFF8664B1)
-    else -> Color(0xFF71858A)
-}
+private fun trendStageColor(stage: Stage): Color = stage.themeColor().primary
+private fun trendStageColor(category: String): Color = StagePalette.styles[(category.hashCode() and 0x7fffffff) % StagePalette.styles.size].primary
 
 private fun axisFor(points: List<TrendPoint>, reference: Pair<TrendPoint, ReferenceLimits>?): UnitAxis? =
     if (points.isEmpty()) null else run {
@@ -190,7 +185,7 @@ fun TrendDetail(
                         if (shownStages.isNotEmpty()) Text("阶段", style = MaterialTheme.typography.titleMedium)
                         shownStages.forEach { stage ->
                             Column(Modifier.clickable { selectedStage = stage }) {
-                                Text("${stage.category} · ${stage.title}", color = trendStageColor(stage.category), fontWeight = FontWeight.SemiBold)
+                                Text("${stage.category} · ${stage.title}", color = trendStageColor(stage), fontWeight = FontWeight.SemiBold)
                                 Text("${stage.startDate} — ${stage.endDate.ifBlank { "至今" }}", style = MaterialTheme.typography.bodySmall)
                             }
                         }
@@ -301,7 +296,7 @@ private fun TrendPanel(
                 Text("阶段（彩色线段）", style = MaterialTheme.typography.labelLarge)
                 stages.forEach { stage ->
                     Text("━ ${stage.category} · ${stage.title}  ·  ${stage.startDate}—${stage.endDate.ifBlank { "至今" }}",
-                        color = trendStageColor(stage.category), style = MaterialTheme.typography.bodySmall)
+                        color = trendStageColor(stage), style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (reference != null) Text("参考范围取最近一份可解析报告；各次报告可能不同。", color = MedicalPalette.Muted, style = MaterialTheme.typography.bodySmall)
@@ -793,7 +788,7 @@ private fun DirectTrendChart(
                         stages.forEach { stage ->
                             val bounds = stageBounds(stage) ?: return@forEach
                             val lineY = plotBottom + stageOffset + (stageLanes[stage.id] ?: 0) * laneHeight
-                            val color = trendStageColor(stage.category)
+                            val color = trendStageColor(stage)
                             drawLine(
                                 color,
                                 Offset(bounds.first, lineY),
@@ -896,7 +891,7 @@ private fun DirectTrendChart(
                                             }
                                         }
                                         is Stage -> {
-                                            Text(content.title, color = trendStageColor(content.category), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                            Text(content.title, color = trendStageColor(content), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                             Text("${content.startDate} — ${content.endDate.ifBlank { "至今" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                             Text(content.note.ifBlank { "未填写具体措施" }, style = MaterialTheme.typography.bodyMedium)
                                         }

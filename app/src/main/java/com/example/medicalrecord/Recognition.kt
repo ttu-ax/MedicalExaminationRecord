@@ -22,10 +22,17 @@ private const val VISION_MODEL = "qwen3.7-flash"
 private val reportTypes = setOf("血常规", "生化", "凝血", "其他")
 private val datePattern = Regex("(\\d{4})[-年/.](\\d{1,2})[-月/.](\\d{1,2})")
 private val imageEncodingLock = Any()
-private const val PROMPT = """你是检验报告逐字转录助手。读取这一张报告图片，仅返回 JSON 对象。
+
+private fun buildPrompt(categories: List<String>): String {
+    val categoryListStr = (categories + "其他").joinToString("|")
+    val categoryOptionsText = categories.joinToString("、")
+    return """你是检验报告逐字转录助手。读取这一张报告图片，仅返回 JSON 对象。
 不要诊断、推断、解释或补充常见正常值。不要提取姓名、病历号等身份信息。
-格式：{"report_type":"血常规|生化|凝血|其他", "suggested_category":"建议分类名或空字符串", "sample_date":"YYYY-MM-DD 或空字符串", "report_date":"YYYY-MM-DD 或空字符串", "institution":"报告上可见机构或空字符串", "observations":[{"name":"报告项目原文", "value":"结果原文", "unit":"单位原文或空字符串", "reference":"参考范围原文或空字符串", "flag":"报告提示↑、↓或空字符串"}]}。
-必须逐行检查表格两栏/多栏，保持项目与结果、范围、单位同行对应。看不清的字段写空字符串，不猜测。报告类型不确定写其他；此时根据报告标题和项目名称给出简短、具体的 suggested_category，不确定则留空。其他类型的 suggested_category 留空。日期仅使用报告上实际印刷的采样或报告日期。只输出 JSON。"""
+系统支持的已知报告分类包括：$categoryOptionsText，若不属于这些分类则选择“其他”。
+格式：{"report_type":"$categoryListStr", "suggested_category":"建议分类名或空字符串", "sample_date":"YYYY-MM-DD 或空字符串", "report_date":"YYYY-MM-DD 或空字符串", "institution":"报告上可见机构或空字符串", "observations":[{"name":"报告项目原文", "value":"结果原文", "unit":"单位原文或空字符串", "reference":"参考范围原文或空字符串", "flag":"报告提示↑、↓或空字符串"}]}。
+必须逐行检查表格两栏/多栏，保持项目与结果、范围、单位同行对应。看不清的字段写空字符串，不猜测。
+请优先从已知分类中选择最匹配的填入 report_type；若明显不属于上述已知分类，report_type 写“其他”；此时根据报告标题和项目名称给出简短、具体的 suggested_category，不确定则留空。非“其他”分类的 suggested_category 必须留空。日期仅使用报告上实际印刷的采样或报告日期。只输出 JSON。"""
+}
 
 fun copyImage(context: Context, source: Uri): String {
     val mime = context.contentResolver.getType(source) ?: "image/jpeg"
@@ -96,12 +103,23 @@ private fun imageBase64(path: String): String = synchronized(imageEncodingLock) 
     }
 }
 
-fun recognizeImage(path: String, apiKey: String, onStage: (String) -> Unit, onStream: (String) -> Unit): RecognizedReport {
+fun recognizeImage(
+    path: String,
+    apiKey: String,
+    categories: List<String> = emptyList(),
+    onStage: (String) -> Unit,
+    onStream: (String) -> Unit
+): RecognizedReport {
     require(apiKey.isNotBlank()) { "请先在设置中填写 API Key" }
+    val effectiveCategories = (listOf("血常规", "生化") + categories)
+        .map { it.trim() }
+        .filter { it.isNotBlank() && it != "其他" }
+        .distinct()
     onStage("压缩图片")
     val encoded = imageBase64(path)
+    val prompt = buildPrompt(effectiveCategories)
     val messages = JSONArray()
-        .put(JSONObject().put("role", "system").put("content", PROMPT))
+        .put(JSONObject().put("role", "system").put("content", prompt))
         .put(JSONObject().put("role", "user").put("content", JSONArray()
             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$encoded")))
             .put(JSONObject().put("type", "text").put("text", "请逐项转录这张报告。"))))
@@ -158,21 +176,50 @@ fun recognizeImage(path: String, apiKey: String, onStage: (String) -> Unit, onSt
         if (name.isNotEmpty()) rows.add(Observation(0, 0, name, clean(item.opt("value")), clean(item.opt("unit")), clean(item.opt("reference")), clean(item.opt("flag")), indicatorKey(name)))
     }
     if (rows.isEmpty()) throw IllegalStateException("未识别到检验项目，请裁剪或重拍")
-    var type = clean(parsed.opt("report_type"), 20).takeIf { it in reportTypes } ?: "其他"
+
+    val rawType = clean(parsed.opt("report_type"), 40)
+    val rawSuggestion = clean(parsed.opt("suggested_category"), 40)
+    var type = effectiveCategories.firstOrNull { it.equals(rawType, ignoreCase = true) }
+    if (type == null && rawSuggestion.isNotBlank()) {
+        type = effectiveCategories.firstOrNull { it.equals(rawSuggestion, ignoreCase = true) }
+    }
+    if (type == null) {
+        type = "其他"
+    }
+
     if (type == "其他") {
         onStage("判断报告类型")
-        type = try { decideType(apiKey, rows) ?: type } catch (_: Exception) { type }
+        type = try { decideType(apiKey, rows, effectiveCategories) ?: type } catch (_: Exception) { type }
     }
-    val suggestion = if (type == "其他") clean(parsed.opt("suggested_category"), 40).takeUnless { it == "其他" } ?: "" else ""
-    return RecognizedReport(Report(0, type, normalizedDate(parsed.opt("sample_date")), normalizedDate(parsed.opt("report_date")), clean(parsed.opt("institution")), path, "待校对", model, suggestedCategory = suggestion), rows)
+    val finalCategory = if (type != "其他") type else "其他"
+    val suggestion = if (finalCategory == "其他") {
+        val candidate = if (rawSuggestion.isNotBlank() && rawSuggestion != "其他") rawSuggestion else rawType
+        clean(candidate, 40).takeUnless { it == "其他" } ?: ""
+    } else ""
+    return RecognizedReport(
+        Report(0, type, normalizedDate(parsed.opt("sample_date")), normalizedDate(parsed.opt("report_date")), clean(parsed.opt("institution")), path, "待校对", model, category = finalCategory, suggestedCategory = suggestion),
+        rows
+    )
 }
 
-private fun decideType(apiKey: String, rows: List<Observation>): String? {
+private fun decideType(apiKey: String, rows: List<Observation>, categories: List<String>): String? {
     val criteria = JSONObject()
-        .put("blood_count", "血常规：白细胞、红细胞、血小板等血细胞指标")
-        .put("biochemistry", "生化：肝肾功能、血脂、血糖等生化指标")
-        .put("coagulation", "凝血：凝血酶原时间、纤维蛋白原、D-二聚体等")
-        .put("other", "其他类别或证据不足")
+    val choiceMap = mutableMapOf<String, String>()
+
+    val builtInDescs = mapOf(
+        "血常规" to "血常规：白细胞、红细胞、血小板等血细胞指标",
+        "生化" to "生化：肝肾功能、血脂、血糖等生化指标",
+        "凝血" to "凝血：凝血酶原时间、纤维蛋白原、D-二聚体等"
+    )
+
+    categories.forEachIndexed { index, cat ->
+        val key = "cat_$index"
+        val desc = builtInDescs[cat] ?: "$cat：相关指标检验报告"
+        criteria.put(key, desc)
+        choiceMap[key] = cat
+    }
+    criteria.put("other", "其他类别或证据不足")
+
     val question = JSONObject().put("type", "choice").put("instructions", "仅依据项目名称判断这份检验报告属于哪一类；不确定时选择 other。")
         .put("criteria", criteria)
     val body = JSONObject().put("model", "decision-model-preview")
@@ -185,6 +232,6 @@ private fun decideType(apiKey: String, rows: List<Observation>): String? {
         val result = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
         val answer = result.optJSONObject("answers")?.optJSONObject("report_type") ?: return null
         if (answer.optDouble("confidence", 0.0) < 0.8) return null
-        when (answer.optString("choice")) { "blood_count" -> "血常规"; "biochemistry" -> "生化"; "coagulation" -> "凝血"; else -> null }
+        choiceMap[answer.optString("choice")]
     } finally { connection.disconnect() }
 }

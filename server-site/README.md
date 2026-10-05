@@ -24,6 +24,8 @@ GITEE_TOKEN=你的 Gitee 私人令牌
 
 ## 双渠道发布（网站恢复后）
 
+当前双渠道入口将同一份 APK 发布到 Gitee 和相邻目录 `../app-release-site` 管理的多应用网站。网站部署会同步根清单、`apps/medical-record/update.json` 和 `apps.json`，保留多应用首页与其他应用。运行 `scripts/publish-all.ps1` 或 `scripts/publish-release.cmd` 即可；失败后使用 `-Resume` 复用已构建版本。App 新版同时检查自建站和 Gitee，已安装的 0.5.9、0.5.11 需先通过 Gitee 或手动安装升级。
+
 双击仓库根目录的 `scripts/publish-release.cmd` 会依次准备新版本、上传本站、提交并推送 Gitee 代码，再创建 Gitee Release。也可在 PowerShell 中运行：
 
 ```powershell

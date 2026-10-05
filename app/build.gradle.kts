@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.medicalrecord"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.5.9"
+        versionCode = 17
+        versionName = "0.5.12"
     }
 
     buildFeatures {
@@ -29,6 +29,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.compose.ui:ui:1.6.8")

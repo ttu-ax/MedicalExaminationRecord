@@ -203,3 +203,41 @@ fun MedicalRecordTheme(
         )
     }
 }
+
+data class StageThemeColor(
+    val name: String,
+    val primary: Color,
+    val containerLight: Color,
+    val onContainerLight: Color,
+    val containerDark: Color,
+    val onContainerDark: Color
+)
+
+object StagePalette {
+    val styles = listOf(
+        StageThemeColor("Emerald", Color(0xFF10B981), Color(0xFFD1FAE5), Color(0xFF065F46), Color(0xFF064E3B), Color(0xFF6EE7B7)),
+        StageThemeColor("Ocean", Color(0xFF2563EB), Color(0xFFDBEAFE), Color(0xFF1E40AF), Color(0xFF1E3A8A), Color(0xFF93C5FD)),
+        StageThemeColor("Amber", Color(0xFFF59E0B), Color(0xFFFEF3C7), Color(0xFF92400E), Color(0xFF78350F), Color(0xFFFDE68A)),
+        StageThemeColor("Violet", Color(0xFF8B5CF6), Color(0xFFEDE9FE), Color(0xFF5B21B6), Color(0xFF4C1D95), Color(0xFFC4B5FD)),
+        StageThemeColor("Rose", Color(0xFFF43F5E), Color(0xFFFFE4E6), Color(0xFF9F1239), Color(0xFF881337), Color(0xFFFDA4AF)),
+        StageThemeColor("Teal", Color(0xFF14B8A6), Color(0xFFCCFBF1), Color(0xFF115E59), Color(0xFF134E4A), Color(0xFF5EEAD4)),
+        StageThemeColor("Orange", Color(0xFFF97316), Color(0xFFFFEDD5), Color(0xFF9A3412), Color(0xFF7C2D12), Color(0xFFFDBA74)),
+        StageThemeColor("Indigo", Color(0xFF6366F1), Color(0xFFE0E7FF), Color(0xFF3730A3), Color(0xFF312E81), Color(0xFFA5B4FC)),
+        StageThemeColor("Fuchsia", Color(0xFFD946EF), Color(0xFFFAE8FF), Color(0xFF86198F), Color(0xFF701A75), Color(0xFFF0ABFC)),
+        StageThemeColor("Lime", Color(0xFF84CC16), Color(0xFFECFCCB), Color(0xFF3F6212), Color(0xFF365314), Color(0xFFBEF264)),
+        StageThemeColor("Sky", Color(0xFF0EA5E9), Color(0xFFE0F2FE), Color(0xFF075985), Color(0xFF0C4A6E), Color(0xFF7DD3FC)),
+        StageThemeColor("WarmSienna", Color(0xFFC2410C), Color(0xFFFFEDD5), Color(0xFF7C2D12), Color(0xFF431407), Color(0xFFFFEDD5))
+    )
+
+    fun colorFor(id: Long, title: String, category: String): StageThemeColor {
+        val index = if (id > 0) {
+            (((id - 1) % styles.size + styles.size) % styles.size).toInt()
+        } else {
+            val hash = (title.hashCode() * 31 + category.hashCode()) and 0x7fffffff
+            hash % styles.size
+        }
+        return styles[index]
+    }
+}
+
+fun Stage.themeColor(): StageThemeColor = StagePalette.colorFor(id, title, category)
