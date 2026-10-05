@@ -6,7 +6,8 @@ param(
     [long]$MinimumSupportedVersionCode,
     [switch]$ForceUpdate,
     [switch]$Resume,
-    [switch]$SkipSite
+    [switch]$SkipSite,
+    [switch]$GiteeDirectConnection
 )
 
 $ErrorActionPreference = 'Stop'
@@ -86,7 +87,7 @@ if ($toCommit.Count) {
     Invoke-Git @('commit', '-m', "Publish $($manifest.version_name)") | ForEach-Object { Write-Host $_ }
 }
 Invoke-Git @('push', 'gitee', 'HEAD:main') | Out-Null
-& (Join-Path $PSScriptRoot 'publish-gitee-release.ps1')
+& (Join-Path $PSScriptRoot 'publish-gitee-release.ps1') -DirectConnection:$GiteeDirectConnection
 
 if ($siteError) {
     throw "Gitee Release is published, but the website upload failed: $($siteError.Exception.Message). Run deploy-prepared-release.ps1 to retry the website."

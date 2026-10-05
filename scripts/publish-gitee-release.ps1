@@ -2,7 +2,8 @@
 param(
     [string]$Owner = 'afeng66',
     [string]$Repository = 'MedicalExaminationRecord',
-    [string]$Remote = 'gitee'
+    [string]$Remote = 'gitee',
+    [switch]$DirectConnection
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,7 +112,9 @@ if ([string]::IsNullOrWhiteSpace($token)) { throw 'Gitee token is required.' }
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Net.Http
-$client = New-Object System.Net.Http.HttpClient
+$handler = New-Object System.Net.Http.HttpClientHandler
+if ($DirectConnection) { $handler.UseProxy = $false }
+$client = [System.Net.Http.HttpClient]::new($handler)
 try {
     $client.DefaultRequestHeaders.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $token)
     $client.Timeout = [TimeSpan]::FromMinutes(10)
