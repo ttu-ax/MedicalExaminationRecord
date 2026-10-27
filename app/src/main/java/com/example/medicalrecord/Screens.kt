@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -43,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -185,7 +187,7 @@ fun ReportsScreen(
 ) {
     var adding by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
-    val allCategories = (categories + reports.map { it.category }).distinct().sorted()
+    val allCategories = remember(reports, categories) { reportCategoriesByCount(reports, categories) }
     LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Spacer(Modifier.height(20.dp))
@@ -213,7 +215,7 @@ fun ReportsScreen(
             val count = reports.count { it.category == category }
             val pending = reports.count { it.category == category && it.status != "已确认" }
             val confirmedIds = reports.filter { it.category == category && it.status == "已确认" && validDate(it.sampleDate) }.map { it.id }.toSet()
-            val trendCount = observations.filter { it.reportId in confirmedIds && it.value.trim().replace(",", "").toDoubleOrNull() != null }
+            val trendCount = observations.filter { it.reportId in confirmedIds && it.trendValue() != null }
                 .map { it.indicatorKey }.distinct().size
             InfoCard(Modifier.bouncyClickable { onOpenCategory(category) }) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -246,26 +248,32 @@ fun ReportsScreen(
 fun CategoryReportsScreen(
     category: String, reports: List<Report>, observations: List<Observation>, view: String,
     onBack: () -> Unit, onOpen: (Long) -> Unit, onViewChange: (String) -> Unit, onOpenTrend: (String) -> Unit,
-    onRename: (String) -> Unit, onDeleteEmpty: () -> Unit
+    onRename: (String) -> Unit, onDeleteEmpty: () -> Unit,
+    pinnedIndicators: Set<String>, onTogglePin: (String) -> Unit
 ) {
-    var query by remember(category, view) { mutableStateOf("") }
+    var reportQuery by rememberSaveable(category) { mutableStateOf("") }
+    var trendQuery by rememberSaveable(category) { mutableStateOf("") }
+    val query = if (view == "报告") reportQuery else trendQuery
+    val onQueryChange: (String) -> Unit = { if (view == "报告") reportQuery = it else trendQuery = it }
+    val reportListState = rememberLazyListState()
+    val trendListState = rememberLazyListState()
     var renaming by remember(category) { mutableStateOf(false) }
     var deletingCategory by remember(category) { mutableStateOf(false) }
     var newName by remember(category) { mutableStateOf(category) }
     var error by remember(category) { mutableStateOf("") }
     val inCategory = reports.filter { it.category == category }
-    val confirmedIds = inCategory.filter { it.status == "已确认" && validDate(it.sampleDate) }.map { it.id }.toSet()
-    val trendKeys = observations.filter { it.reportId in confirmedIds && it.value.trim().replace(",", "").toDoubleOrNull() != null }
-        .map { it.indicatorKey }.distinct().sorted()
-    val reportById = reports.associateBy { it.id }
+    val indicators = remember(category, reports, observations, pinnedIndicators) {
+        categoryTrendIndicators(category, reports, observations, pinnedIndicators)
+    }
     val shown = inCategory.filter { query.isBlank() || listOf(it.type, it.institution, it.sampleDate).any { value -> value.contains(query, ignoreCase = true) } }
         .sortedWith(compareBy<Report> { it.status == "已确认" }.thenByDescending { it.sampleDate }.thenByDescending { it.id })
-    val shownKeys = trendKeys.filter { query.isBlank() || it.contains(query, ignoreCase = true) }
-    LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val shownIndicators = indicators.filter { query.isBlank() || it.key.contains(query, ignoreCase = true) }
+    LazyColumn(Modifier.fillMaxWidth().padding(16.dp), state = if (view == "报告") reportListState else trendListState,
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             TextButton(onClick = onBack) { Text("← 所有分类") }
             SectionTitle(category)
-            Text("${inCategory.size} 份报告 · ${trendKeys.size} 项趋势", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${inCategory.size} 份报告 · ${indicators.size} 项趋势", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (view == "报告") Button(onClick = { onViewChange("报告") }) { Text("报告") }
                 else OutlinedButton(onClick = { onViewChange("报告") }) { Text("报告") }
@@ -279,7 +287,7 @@ fun CategoryReportsScreen(
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         }
         if (view == "报告") {
-            if (inCategory.size > 3) item { OutlinedTextField(query, { query = it }, label = { Text("搜索报告") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+            if (inCategory.size > 3) item { OutlinedTextField(query, onQueryChange, label = { Text("搜索报告") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
             if (shown.isEmpty()) item { Text(if (inCategory.isEmpty()) "这个分类还没有报告。可在报告详情中将报告移入此分类。" else "没有匹配的报告。") }
             items(shown, key = { it.id }) { report ->
                 InfoCard(Modifier.bouncyClickable { onOpen(report.id) }) {
@@ -293,18 +301,17 @@ fun CategoryReportsScreen(
         } else {
             item {
                 Text("选一个指标，查看跨分类的全部已确认记录。每个数据点都会标明来源。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (trendKeys.size > 3) OutlinedTextField(query, { query = it }, label = { Text("搜索指标") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                if (indicators.size > 3) OutlinedTextField(query, onQueryChange, label = { Text("搜索指标") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             }
-            if (shownKeys.isEmpty()) item { Text(if (trendKeys.isEmpty()) "当前分类尚无可绘制指标。先校对报告，确认后会出现在这里。" else "没有匹配的指标。") }
-            items(shownKeys, key = { it }) { key ->
-                val allRows = observations.filter {
-                    it.indicatorKey == key && it.value.trim().replace(",", "").toDoubleOrNull() != null &&
-                        reportById[it.reportId]?.let { report -> report.status == "已确认" && validDate(report.sampleDate) } == true
-                }
-                val sources = allRows.mapNotNull { reportById[it.reportId]?.category }.distinct()
-                InfoCard(Modifier.bouncyClickable { onOpenTrend(key) }) {
-                    Text(key, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
-                    Text("${allRows.size} 次记录 · 来源：${sources.joinToString("、")}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (shownIndicators.isEmpty()) item { Text(if (indicators.isEmpty()) "当前分类尚无可绘制指标。先校对报告，确认后会出现在这里。" else "没有匹配的指标。") }
+            items(shownIndicators, key = { it.key }) { indicator ->
+                val pinned = indicator.key in pinnedIndicators
+                InfoCard(Modifier.bouncyClickable { onOpenTrend(indicator.key) }) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(indicator.key, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { onTogglePin(indicator.key) }) { Text(if (pinned) "取消置顶" else "置顶") }
+                    }
+                    Text("${indicator.recordCount} 次记录 · 来源：${indicator.sources.joinToString("、")}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

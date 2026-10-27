@@ -119,9 +119,7 @@ private fun pointsFor(key: String, rows: List<Observation>, reports: List<Report
     return rows.filter { it.indicatorKey == key }.mapNotNull { row ->
         val report = byId[row.reportId] ?: return@mapNotNull null
         if (report.status != "已确认" || !validDate(report.sampleDate)) return@mapNotNull null
-        val text = row.value.trim().replace(",", "")
-        if (!Regex("^[-+]?\\d+(?:\\.\\d+)?$").matches(text)) return@mapNotNull null
-        val value = text.toDoubleOrNull() ?: return@mapNotNull null
+        val value = row.trendValue() ?: return@mapNotNull null
         TrendPoint(row, report, LocalDate.parse(report.sampleDate).toEpochDay(), value)
     }.sortedWith(compareBy<TrendPoint> { it.day }.thenBy { it.observation.id })
 }

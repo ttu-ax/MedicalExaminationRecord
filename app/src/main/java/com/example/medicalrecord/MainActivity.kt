@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -55,6 +56,15 @@ private sealed class AppDestination {
     data class ReportScreen(val reportId: Long) : AppDestination()
     data class IndicatorScreen(val indicatorName: String) : AppDestination()
     data object DataManagement : AppDestination()
+
+    val stateKey: String
+        get() = when (this) {
+            is TabScreen -> "tab:$tabIndex"
+            is CategoryScreen -> "category:$categoryName"
+            is ReportScreen -> "report:$reportId"
+            is IndicatorScreen -> "indicator:$indicatorName"
+            is DataManagement -> "data-management"
+        }
 
     val depth: Int
         get() = when (this) {
@@ -157,6 +167,15 @@ class MainActivity : ComponentActivity() {
         var lastBackupAt by remember { mutableStateOf(getSharedPreferences("data-backup", MODE_PRIVATE).getLong("last_export", 0L)) }
         var selectedCategory by remember { mutableStateOf<String?>(null) }
         var categoryView by remember { mutableStateOf("报告") }
+        val screenStateHolder = rememberSaveableStateHolder()
+        val trendPreferences = remember { getSharedPreferences("trend-preferences", MODE_PRIVATE) }
+        var pinnedIndicators by remember {
+            mutableStateOf(trendPreferences.getStringSet("pinned-indicators", emptySet())!!.toSet())
+        }
+        val toggleIndicatorPin: (String) -> Unit = { key ->
+            pinnedIndicators = if (key in pinnedIndicators) pinnedIndicators - key else pinnedIndicators + key
+            trendPreferences.edit().putStringSet("pinned-indicators", pinnedIndicators).apply()
+        }
         var selectedReport by remember { mutableStateOf<Long?>(null) }
         var selectedIndicator by remember { mutableStateOf<String?>(null) }
         var reportOriginIndicator by remember { mutableStateOf<String?>(null) }
@@ -424,164 +443,168 @@ class MainActivity : ComponentActivity() {
                 label = "screenTransition",
                 modifier = Modifier.fillMaxSize().padding(padding)
             ) { currentDest ->
-                when (currentDest) {
-                    is AppDestination.ReportScreen -> {
-                        val report = reports.firstOrNull { it.id == currentDest.reportId }
-                        if (report != null) ReportDetail(
-                            report, observations.filter { it.reportId == report.id }, categories,
-                            onBack = ::goBack,
-                            onSaveReport = {
-                                db.updateReport(it)
-                                refresh()
-                                if (reportOriginIndicator == null && tab == 1) selectedCategory = it.category
-                                if (it.status == "已确认" && it.id in reviewQueue) {
-                                    reviewQueue = reviewQueue.filterNot { id -> id == it.id }
-                                    selectedReport = reviewQueue.firstOrNull()
-                                    if (selectedReport != null) selectedCategory = reports.firstOrNull { item -> item.id == selectedReport }?.category
-                                    if (selectedReport == null) notice = "全部校对完成，可在报告分类中查看指标趋势。"
-                                }
-                            },
-                            onSaveObservation = { db.updateObservation(it); db.updateReport(report.copy(status = "待校对")); refresh() },
-                            onAddObservation = { db.addObservation(report.id, it); db.updateReport(report.copy(status = "待校对")); refresh() },
-                            onDeleteObservation = { db.deleteObservation(it); db.updateReport(report.copy(status = "待校对")); refresh() },
-                            onDeleteReport = {
-                                db.deleteReport(report.id)
-                                File(report.imagePath).delete()
-                                reviewQueue = reviewQueue.filterNot { it == report.id }
-                                selectedReport = reviewQueue.firstOrNull()
-                                refresh()
-                            },
-                            onAddCategory = { name -> db.addCategory(name); refresh() },
-                            onRetry = {
-                                if (busy) return@ReportDetail
-                                val apiKey = keyStore.read()
-                                if (apiKey.isBlank()) {
-                                    notice = "请先在设置中填写 API Key"
-                                    selectedReport = null
-                                    tab = 3
-                                    return@ReportDetail
-                                }
-                                busy = true
-                                notice = "正在重新识别…"
-                                progress = RecognitionProgress(1, 1, 0, "准备图片")
-                                Thread {
-                                    try {
-                                        val result = recognizeImage(report.imagePath, apiKey, categories = db.allCategories(),
-                                            onStage = { stage -> runOnUiThread { progress = progress?.copy(stage = stage) } },
-                                            onStream = { stream -> runOnUiThread { progress = progress?.copy(stream = stream) } })
-                                        db.updateReport(report.copy(type = result.report.type, category = result.report.category, sampleDate = result.report.sampleDate, reportDate = result.report.reportDate, institution = result.report.institution, status = "待校对", suggestedCategory = result.report.suggestedCategory))
-                                        db.replaceObservations(report.id, result.observations)
-                                        runOnUiThread { refresh(); notice = "重新识别完成，请校对新增项目。"; busy = false; progress = progress?.copy(completed = 1, stage = notice, active = false) }
-                                    } catch (error: Exception) {
-                                        runOnUiThread { notice = "重新识别失败"; busy = false; progress = progress?.copy(stage = notice, error = error.message ?: "未知错误", active = false) }
+                screenStateHolder.SaveableStateProvider(currentDest.stateKey) {
+                    when (currentDest) {
+                        is AppDestination.ReportScreen -> {
+                            val report = reports.firstOrNull { it.id == currentDest.reportId }
+                            if (report != null) ReportDetail(
+                                report, observations.filter { it.reportId == report.id }, categories,
+                                onBack = ::goBack,
+                                onSaveReport = {
+                                    db.updateReport(it)
+                                    refresh()
+                                    if (reportOriginIndicator == null && tab == 1) selectedCategory = it.category
+                                    if (it.status == "已确认" && it.id in reviewQueue) {
+                                        reviewQueue = reviewQueue.filterNot { id -> id == it.id }
+                                        selectedReport = reviewQueue.firstOrNull()
+                                        if (selectedReport != null) selectedCategory = reports.firstOrNull { item -> item.id == selectedReport }?.category
+                                        if (selectedReport == null) notice = "全部校对完成，可在报告分类中查看指标趋势。"
                                     }
-                                }.start()
-                            }
-                        ) else selectedReport = null
-                    }
-                    is AppDestination.IndicatorScreen -> {
-                        TrendDetail(
-                            currentDest.indicatorName, observations, reports, stages,
-                            onBack = ::goBack,
-                            onOpenReport = { reportOriginIndicator = currentDest.indicatorName; selectedReport = it; selectedIndicator = null },
-                            onStages = { selectedIndicator = null; selectedCategory = null; tab = 2 },
-                            sourceCategory = selectedCategory
-                        )
-                    }
-                    is AppDestination.CategoryScreen -> {
-                        CategoryReportsScreen(
-                            currentDest.categoryName, reports, observations, categoryView,
-                            onBack = { selectedCategory = null },
-                            onOpen = { selectedReport = it },
-                            onViewChange = { categoryView = it },
-                            onOpenTrend = { selectedIndicator = it; categoryView = "趋势" },
-                            onRename = { name ->
-                                db.renameCategory(currentDest.categoryName, name)
-                                selectedCategory = name
-                                refresh()
-                            },
-                            onDeleteEmpty = { db.deleteEmptyCategory(currentDest.categoryName); selectedCategory = null; refresh() }
-                        )
-                    }
-                    is AppDestination.DataManagement -> {
-                        DataManagementScreen(
-                            reports.size, stages.size, lastBackupAt, dataMessage,
-                            onBack = { dataPage = false },
-                            onExportBackup = {
-                                if (busy) dataMessage = "请等待图片识别完成后再备份。"
-                                else exportBackup.launch("medical-record-backup-${LocalDate.now()}.zip")
-                            },
-                            onRestoreBackup = {
-                                if (busy) dataMessage = "请等待图片识别完成后再恢复。"
-                                else restoreBackup.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
-                            },
-                            onImportCsv = {
-                                if (busy) dataMessage = "请等待图片识别完成后再导入。"
-                                else importCsv.launch(arrayOf("text/*", "application/vnd.ms-excel", "application/octet-stream"))
-                            },
-                            onExportCsv = {
-                                if (busy) dataMessage = "请等待图片识别完成后再导出。"
-                                else exportCsv.launch("medical-record-indicators-${LocalDate.now()}.csv")
-                            }
-                        )
-                    }
-                    is AppDestination.TabScreen -> {
-                        when (currentDest.tabIndex) {
-                            0 -> Overview(reports, observations, stages, busy, notice, hasKey,
-                                ::selectPhotos, ::takePhoto, { id -> tab = 1; categoryView = "报告"; selectedReport = id; selectedCategory = reports.firstOrNull { it.id == id }?.category }, { selectedIndicator = it },
-                                onReports = { tab = 1; selectedCategory = null },
-                                onTrends = {
-                                    tab = 1
-                                    selectedCategory = reports.firstOrNull { report ->
-                                        report.status == "已确认" && observations.any { it.reportId == report.id && it.number() != null }
-                                    }?.category
-                                    categoryView = "趋势"
                                 },
-                                onStages = { tab = 2 })
-                            1 -> if (selectedCategory == null) ReportsScreen(
-                                reports, observations, categories, busy, notice, ::selectPhotos, ::takePhoto,
-                                onOpenCategory = { selectedCategory = it; categoryView = "报告" },
-                                onAddCategory = { db.addCategory(it); refresh() },
-                                onManual = {
-                                    val today = java.time.LocalDate.now().toString()
-                                    val category = "手工录入"
-                                    val id = db.addReport(Report(0, category, today, today, "", "", "待校对", "手工"), emptyList())
-                                    refresh(); categoryView = "报告"; selectedCategory = category; selectedReport = id
+                                onSaveObservation = { db.updateObservation(it); db.updateReport(report.copy(status = "待校对")); refresh() },
+                                onAddObservation = { db.addObservation(report.id, it); db.updateReport(report.copy(status = "待校对")); refresh() },
+                                onDeleteObservation = { db.deleteObservation(it); db.updateReport(report.copy(status = "待校对")); refresh() },
+                                onDeleteReport = {
+                                    db.deleteReport(report.id)
+                                    File(report.imagePath).delete()
+                                    reviewQueue = reviewQueue.filterNot { it == report.id }
+                                    selectedReport = reviewQueue.firstOrNull()
+                                    refresh()
+                                },
+                                onAddCategory = { name -> db.addCategory(name); refresh() },
+                                onRetry = {
+                                    if (busy) return@ReportDetail
+                                    val apiKey = keyStore.read()
+                                    if (apiKey.isBlank()) {
+                                        notice = "请先在设置中填写 API Key"
+                                        selectedReport = null
+                                        tab = 3
+                                        return@ReportDetail
+                                    }
+                                    busy = true
+                                    notice = "正在重新识别…"
+                                    progress = RecognitionProgress(1, 1, 0, "准备图片")
+                                    Thread {
+                                        try {
+                                            val result = recognizeImage(report.imagePath, apiKey, categories = db.allCategories(),
+                                                onStage = { stage -> runOnUiThread { progress = progress?.copy(stage = stage) } },
+                                                onStream = { stream -> runOnUiThread { progress = progress?.copy(stream = stream) } })
+                                            db.updateReport(report.copy(type = result.report.type, category = result.report.category, sampleDate = result.report.sampleDate, reportDate = result.report.reportDate, institution = result.report.institution, status = "待校对", suggestedCategory = result.report.suggestedCategory))
+                                            db.replaceObservations(report.id, result.observations)
+                                            runOnUiThread { refresh(); notice = "重新识别完成，请校对新增项目。"; busy = false; progress = progress?.copy(completed = 1, stage = notice, active = false) }
+                                        } catch (error: Exception) {
+                                            runOnUiThread { notice = "重新识别失败"; busy = false; progress = progress?.copy(stage = notice, error = error.message ?: "未知错误", active = false) }
+                                        }
+                                    }.start()
                                 }
-                            ) else CategoryReportsScreen(
-                                selectedCategory!!, reports, observations, categoryView,
+                            ) else selectedReport = null
+                        }
+                        is AppDestination.IndicatorScreen -> {
+                            TrendDetail(
+                                currentDest.indicatorName, observations, reports, stages,
+                                onBack = ::goBack,
+                                onOpenReport = { reportOriginIndicator = currentDest.indicatorName; selectedReport = it; selectedIndicator = null },
+                                onStages = { selectedIndicator = null; selectedCategory = null; tab = 2 },
+                                sourceCategory = selectedCategory
+                            )
+                        }
+                        is AppDestination.CategoryScreen -> {
+                            CategoryReportsScreen(
+                                currentDest.categoryName, reports, observations, categoryView,
                                 onBack = { selectedCategory = null },
                                 onOpen = { selectedReport = it },
                                 onViewChange = { categoryView = it },
                                 onOpenTrend = { selectedIndicator = it; categoryView = "趋势" },
                                 onRename = { name ->
-                                    db.renameCategory(selectedCategory!!, name)
+                                    db.renameCategory(currentDest.categoryName, name)
                                     selectedCategory = name
                                     refresh()
                                 },
-                                onDeleteEmpty = { db.deleteEmptyCategory(selectedCategory!!); selectedCategory = null; refresh() }
+                                pinnedIndicators = pinnedIndicators, onTogglePin = toggleIndicatorPin,
+                                onDeleteEmpty = { db.deleteEmptyCategory(currentDest.categoryName); selectedCategory = null; refresh() }
                             )
-                            2 -> StagesScreen(stages,
-                                onAdd = { db.addStage(it); refresh() },
-                                onUpdate = { db.updateStage(it); refresh() },
-                                onDelete = { db.deleteStage(it); refresh() })
-                            else -> SettingsScreen(hasKey, currentVersion, updateChecking, updateCheckStatus, importConcurrency,
-                                onImportConcurrencyChange = { count ->
-                                    importConcurrency = count.coerceIn(1, MAX_IMPORT_CONCURRENCY)
-                                    getSharedPreferences("image-import", MODE_PRIVATE).edit().putInt("concurrency", importConcurrency).apply()
+                        }
+                        is AppDestination.DataManagement -> {
+                            DataManagementScreen(
+                                reports.size, stages.size, lastBackupAt, dataMessage,
+                                onBack = { dataPage = false },
+                                onExportBackup = {
+                                    if (busy) dataMessage = "请等待图片识别完成后再备份。"
+                                    else exportBackup.launch("medical-record-backup-${LocalDate.now()}.zip")
                                 },
-                                onCheckUpdate = { checkForUpdates(manual = true) }, onDataManagement = { dataPage = true },
-                                onSave = { key ->
-                                    keyStore.save(key)
-                                    hasKey = true
-                                    notice = "API Key 已保存"
-                                    if (pendingUris.isNotEmpty()) {
-                                        val selected = pendingUris
-                                        pendingUris = emptyList()
-                                        importUris(selected)
+                                onRestoreBackup = {
+                                    if (busy) dataMessage = "请等待图片识别完成后再恢复。"
+                                    else restoreBackup.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                                },
+                                onImportCsv = {
+                                    if (busy) dataMessage = "请等待图片识别完成后再导入。"
+                                    else importCsv.launch(arrayOf("text/*", "application/vnd.ms-excel", "application/octet-stream"))
+                                },
+                                onExportCsv = {
+                                    if (busy) dataMessage = "请等待图片识别完成后再导出。"
+                                    else exportCsv.launch("medical-record-indicators-${LocalDate.now()}.csv")
+                                }
+                            )
+                        }
+                        is AppDestination.TabScreen -> {
+                            when (currentDest.tabIndex) {
+                                0 -> Overview(reports, observations, stages, busy, notice, hasKey,
+                                    ::selectPhotos, ::takePhoto, { id -> tab = 1; categoryView = "报告"; selectedReport = id; selectedCategory = reports.firstOrNull { it.id == id }?.category }, { selectedIndicator = it },
+                                    onReports = { tab = 1; selectedCategory = null },
+                                    onTrends = {
+                                        tab = 1
+                                        selectedCategory = reports.firstOrNull { report ->
+                                            report.status == "已确认" && observations.any { it.reportId == report.id && it.number() != null }
+                                        }?.category
+                                        categoryView = "趋势"
+                                    },
+                                    onStages = { tab = 2 })
+                                1 -> if (selectedCategory == null) ReportsScreen(
+                                    reports, observations, categories, busy, notice, ::selectPhotos, ::takePhoto,
+                                    onOpenCategory = { selectedCategory = it; categoryView = "报告" },
+                                    onAddCategory = { db.addCategory(it); refresh() },
+                                    onManual = {
+                                        val today = java.time.LocalDate.now().toString()
+                                        val category = "手工录入"
+                                        val id = db.addReport(Report(0, category, today, today, "", "", "待校对", "手工"), emptyList())
+                                        refresh(); categoryView = "报告"; selectedCategory = category; selectedReport = id
                                     }
-                                },
-                                onClear = { keyStore.clear(); hasKey = false; notice = "API Key 已清除" })
+                                ) else CategoryReportsScreen(
+                                    selectedCategory!!, reports, observations, categoryView,
+                                    onBack = { selectedCategory = null },
+                                    onOpen = { selectedReport = it },
+                                    onViewChange = { categoryView = it },
+                                    onOpenTrend = { selectedIndicator = it; categoryView = "趋势" },
+                                    onRename = { name ->
+                                        db.renameCategory(selectedCategory!!, name)
+                                        selectedCategory = name
+                                        refresh()
+                                    },
+                                    pinnedIndicators = pinnedIndicators, onTogglePin = toggleIndicatorPin,
+                                    onDeleteEmpty = { db.deleteEmptyCategory(selectedCategory!!); selectedCategory = null; refresh() }
+                                )
+                                2 -> StagesScreen(stages,
+                                    onAdd = { db.addStage(it); refresh() },
+                                    onUpdate = { db.updateStage(it); refresh() },
+                                    onDelete = { db.deleteStage(it); refresh() })
+                                else -> SettingsScreen(hasKey, currentVersion, updateChecking, updateCheckStatus, importConcurrency,
+                                    onImportConcurrencyChange = { count ->
+                                        importConcurrency = count.coerceIn(1, MAX_IMPORT_CONCURRENCY)
+                                        getSharedPreferences("image-import", MODE_PRIVATE).edit().putInt("concurrency", importConcurrency).apply()
+                                    },
+                                    onCheckUpdate = { checkForUpdates(manual = true) }, onDataManagement = { dataPage = true },
+                                    onSave = { key ->
+                                        keyStore.save(key)
+                                        hasKey = true
+                                        notice = "API Key 已保存"
+                                        if (pendingUris.isNotEmpty()) {
+                                            val selected = pendingUris
+                                            pendingUris = emptyList()
+                                            importUris(selected)
+                                        }
+                                    },
+                                    onClear = { keyStore.clear(); hasKey = false; notice = "API Key 已清除" })
+                            }
                         }
                     }
                 }
